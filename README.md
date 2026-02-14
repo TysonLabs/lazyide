@@ -22,6 +22,7 @@ scoop install lazyide
 ```bash
 cargo install --git https://github.com/tgeorge06/lazyide
 ```
+This compiles all dependencies from scratch and may take a few minutes on the first install.
 
 **Prebuilt binaries:** Download from [Releases](https://github.com/tgeorge06/lazyide/releases) for Linux, macOS, and Windows.
 
