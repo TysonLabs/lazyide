@@ -12,6 +12,12 @@ brew tap tgeorge06/tap
 brew install lazyide
 ```
 
+**Windows (Scoop):**
+```powershell
+scoop bucket add lazyide https://github.com/tgeorge06/scoop-bucket
+scoop install lazyide
+```
+
 **From source (all platforms):**
 ```bash
 cargo install --git https://github.com/tgeorge06/lazyide

@@ -4327,6 +4327,13 @@ fn state_file_path() -> Option<PathBuf> {
             return Some(PathBuf::from(xdg).join(STATE_FILE_REL));
         }
     }
+    // Windows: use %APPDATA% (e.g. C:\Users\X\AppData\Roaming)
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        if !appdata.is_empty() {
+            return Some(PathBuf::from(appdata).join(STATE_FILE_REL));
+        }
+    }
+    // Unix/macOS: use $HOME/.config
     std::env::var("HOME")
         .ok()
         .map(|home| PathBuf::from(home).join(".config").join(STATE_FILE_REL))
