@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 arboard = "3.4"
+include_dir = "0.7.4"
 notify = "6"
 ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }

@@ -36,6 +36,16 @@ cp target/release/lazyide /usr/local/bin/
 
 **Requirements:** Rust (2024 edition)
 
+## Setup
+
+After installing, run the setup command to check for optional tools:
+
+```bash
+lazyide --setup
+```
+
+This detects missing tools (rust-analyzer, ripgrep) and offers to install them automatically.
+
 **Optional external tools** (not installed by cargo, must be installed separately):
 - [`rust-analyzer`](https://rust-analyzer.github.io/manual.html#installation) — enables LSP completions, diagnostics, and go-to-definition for Rust files
 - [`rg` (ripgrep)](https://github.com/BurntSushi/ripgrep#installation) — enables project-wide search (`Ctrl+Shift+F`)

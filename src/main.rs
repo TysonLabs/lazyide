@@ -29,9 +29,11 @@ use ratatui::{Frame, Terminal};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tui_textarea::{Input, TextArea};
+use include_dir::{Dir, include_dir};
 use url::Url;
 
 const LOCAL_THEME_DIR: &str = "themes";
+static EMBEDDED_THEMES: Dir = include_dir!("$CARGO_MANIFEST_DIR/themes");
 const STATE_FILE_REL: &str = "lazyide/state.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -543,7 +545,16 @@ impl App {
         app.restore_persisted_state();
         app.rebuild_tree()?;
         app.start_fs_watcher();
-        app.status = format!("Root: {}", app.root.display());
+        let has_ra = resolve_rust_analyzer_bin().is_some();
+        let has_rg = Command::new("rg").arg("--version").output().is_ok();
+        if !has_ra || !has_rg {
+            let mut missing = Vec::new();
+            if !has_ra { missing.push("rust-analyzer"); }
+            if !has_rg { missing.push("rg"); }
+            app.status = format!("Missing tools: {}. Run `lazyide --setup` to install.", missing.join(", "));
+        } else {
+            app.status = format!("Root: {}", app.root.display());
+        }
         Ok(app)
     }
 
@@ -4381,17 +4392,27 @@ fn load_themes() -> Vec<Theme> {
             break;
         }
     }
+    // Fall back to themes embedded in the binary
     if themes.is_empty() {
-        themes.push(Theme {
-            name: "Fallback Dark".into(),
-            theme_type: "dark".into(),
-            bg: Color::Rgb(20, 22, 31),
-            bg_alt: Color::Rgb(25, 28, 39),
-            fg: Color::Rgb(215, 213, 189),
-            border: Color::Rgb(127, 122, 88),
-            accent: Color::Rgb(206, 198, 130),
-            selection: Color::Rgb(51, 70, 124),
-        });
+        let mut files: Vec<_> = EMBEDDED_THEMES
+            .files()
+            .filter(|f| f.path().extension().is_some_and(|e| e == "json"))
+            .collect();
+        files.sort_by_key(|f| f.path());
+        for file in files {
+            let Some(raw) = file.contents_utf8() else { continue };
+            let Ok(tf) = serde_json::from_str::<ThemeFile>(raw) else { continue };
+            themes.push(Theme {
+                name: tf.name,
+                theme_type: tf.theme_type,
+                bg: color_from_hex(&tf.colors.background, Color::Rgb(20, 22, 31)),
+                bg_alt: color_from_hex(&tf.colors.background_alt, Color::Rgb(25, 28, 39)),
+                fg: color_from_hex(&tf.colors.foreground, Color::Rgb(215, 213, 189)),
+                border: color_from_hex(&tf.colors.border, Color::Rgb(127, 122, 88)),
+                accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
+                selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
+            });
+        }
     }
     themes.sort_by_key(|t| (t.theme_type != "dark", t.name.to_ascii_lowercase()));
     themes
@@ -5250,7 +5271,87 @@ fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io
     }
 }
 
+fn run_setup() -> io::Result<()> {
+    println!("lazyide setup\n");
+
+    let has_ra = resolve_rust_analyzer_bin().is_some();
+    let has_rg = Command::new("rg").arg("--version").output().is_ok();
+
+    if has_ra {
+        println!("  \u{2713} rust-analyzer found");
+    } else {
+        println!("  \u{2717} rust-analyzer not found");
+        println!("    \u{2192} rustup component add rust-analyzer");
+    }
+    if has_rg {
+        println!("  \u{2713} ripgrep (rg) found");
+    } else {
+        println!("  \u{2717} ripgrep (rg) not found");
+        if cfg!(target_os = "macos") {
+            println!("    \u{2192} brew install ripgrep");
+        } else {
+            println!("    \u{2192} cargo install ripgrep");
+        }
+    }
+
+    if has_ra && has_rg {
+        println!("\nAll tools installed. You're good to go!");
+        return Ok(());
+    }
+
+    println!("\nInstall missing tools? [y/N] ");
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    if !input.trim().eq_ignore_ascii_case("y") {
+        return Ok(());
+    }
+
+    if !has_ra {
+        println!("\nInstalling rust-analyzer...");
+        let status = Command::new("rustup")
+            .args(["component", "add", "rust-analyzer"])
+            .status();
+        match status {
+            Ok(s) if s.success() => println!("  \u{2713} rust-analyzer installed"),
+            _ => println!("  \u{2717} Failed. Install manually: rustup component add rust-analyzer"),
+        }
+    }
+
+    if !has_rg {
+        println!("\nInstalling ripgrep...");
+        let (cmd, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+            ("brew", &["install", "ripgrep"])
+        } else {
+            ("cargo", &["install", "ripgrep"])
+        };
+        let status = Command::new(cmd).args(args).status();
+        match status {
+            Ok(s) if s.success() => println!("  \u{2713} ripgrep installed"),
+            _ => println!("  \u{2717} Failed. Install manually: cargo install ripgrep"),
+        }
+    }
+
+    println!("\nSetup complete!");
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
+    if std::env::args().any(|a| a == "--setup") {
+        return run_setup();
+    }
+
+    if std::env::args().any(|a| a == "--help" || a == "-h") {
+        println!("Usage: lazyide [OPTIONS] [PATH]");
+        println!();
+        println!("Arguments:");
+        println!("  [PATH]    Directory to open (default: current directory)");
+        println!();
+        println!("Options:");
+        println!("  --setup   Check for and install optional tools (rust-analyzer, ripgrep)");
+        println!("  --help    Show this help message");
+        return Ok(());
+    }
+
     let root = if let Some(path) = std::env::args().nth(1) {
         PathBuf::from(path)
     } else {
