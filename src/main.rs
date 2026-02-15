@@ -4634,15 +4634,20 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
         (0, vec![String::new()], None, 0, 0, &[] as &[LspDiagnostic], &[] as &[FoldRange], &HashSet::new() as &HashSet<usize>, &[0usize] as &[usize])
     };
     let lines_src = &lines_src_owned;
+    let inner_w = inner.width as usize;
+    let blank_line = Line::from(Span::styled(
+        " ".repeat(inner_w),
+        Style::default().bg(theme.bg),
+    ));
     let mut lines_out: Vec<Line> = Vec::with_capacity(visible_rows);
     for visual_row in 0..visible_rows {
         let visible_idx = start_row + visual_row;
         let Some(&row) = visible_rows_map_ref.get(visible_idx) else {
-            lines_out.push(Line::from(""));
+            lines_out.push(blank_line.clone());
             continue;
         };
         if row >= lines_src.len() {
-            lines_out.push(Line::from(""));
+            lines_out.push(blank_line.clone());
             continue;
         }
         let mut spans = Vec::new();
@@ -5997,6 +6002,56 @@ mod fold_and_selection_tests {
         assert!(row_has_selection(7, 50, sel));
         assert!(!row_has_selection(1, 50, sel));
         assert!(!row_has_selection(8, 50, sel));
+    }
+    #[test]
+    fn test_visible_rows_map_excludes_folded_lines() {
+        // Simulate a 7-line file with lines 1-2 folded (fold starting at line 0)
+        let lines: Vec<String> = (0..7).map(|i| format!("line {i}")).collect();
+        let fold_ranges = vec![FoldRange { start_line: 0, end_line: 2 }];
+        let mut folded_starts = HashSet::new();
+        folded_starts.insert(0usize);
+
+        let mut visible = Vec::new();
+        for row in 0..lines.len() {
+            let hidden = fold_ranges.iter().any(|fr| {
+                folded_starts.contains(&fr.start_line) && row > fr.start_line && row <= fr.end_line
+            });
+            if !hidden {
+                visible.push(row);
+            }
+        }
+
+        // Lines 1 and 2 should be hidden (inside the fold)
+        assert_eq!(visible, vec![0, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn test_visible_rows_map_no_folds_shows_all() {
+        let num_lines = 5;
+        let fold_ranges: Vec<FoldRange> = vec![];
+        let folded_starts: HashSet<usize> = HashSet::new();
+
+        let mut visible = Vec::new();
+        for row in 0..num_lines {
+            let hidden = fold_ranges.iter().any(|fr| {
+                folded_starts.contains(&fr.start_line) && row > fr.start_line && row <= fr.end_line
+            });
+            if !hidden {
+                visible.push(row);
+            }
+        }
+
+        assert_eq!(visible, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_blank_line_fills_full_width() {
+        // Verify that blank lines used for empty/beyond-content rows contain spaces
+        // to overwrite any previous frame content (prevents ghost artifacts)
+        let width = 80usize;
+        let blank = " ".repeat(width);
+        assert_eq!(blank.len(), width);
+        assert!(blank.chars().all(|c| c == ' '));
     }
 }
 
