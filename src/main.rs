@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tui_textarea::{Input, TextArea};
 use include_dir::{Dir, include_dir};
+use unicode_width::UnicodeWidthStr;
 use url::Url;
 
 const LOCAL_THEME_DIR: &str = "themes";
@@ -827,6 +828,17 @@ impl App {
         Ok(())
     }
 
+    fn update_status_for_cursor(&mut self) {
+        if self.focus == Focus::Editor {
+            if let Some(tab) = self.active_tab() {
+                let cursor_row = tab.editor.cursor().0;
+                if let Some(diag) = tab.diagnostics.iter().find(|d| d.line == cursor_row + 1) {
+                    self.status = format!("[{}] {}", diag.severity, diag.message);
+                }
+            }
+        }
+    }
+
     fn poll_autosave(&mut self) -> io::Result<()> {
         if self.autosave_last_write.elapsed()
             < Duration::from_millis(Self::AUTOSAVE_INTERVAL_MS)
@@ -1537,7 +1549,7 @@ impl App {
         }
         let mut idx = col.min(chars.len().saturating_sub(1));
         if !is_ident_char(chars[idx]) {
-            if col > 0 && is_ident_char(chars[col.saturating_sub(1)]) {
+            if col > 0 && col <= chars.len() && is_ident_char(chars[col.saturating_sub(1)]) {
                 idx = col.saturating_sub(1);
             } else {
                 return String::new();
@@ -3148,11 +3160,11 @@ impl App {
             if let Some(tab) = self.active_tab_mut() { tab.editor_scroll_row = 0; }
             return;
         }
-        if self.tabs[self.active_tab].visible_rows_map.is_empty() {
+        if self.active_tab().is_some_and(|t| t.visible_rows_map.is_empty()) {
             self.rebuild_visible_rows();
         }
         let cursor_visible = self.visible_index_of_source_row(cursor_row);
-        let tab = &mut self.tabs[self.active_tab];
+        let Some(tab) = self.active_tab_mut() else { return; };
         if cursor_visible < tab.editor_scroll_row {
             tab.editor_scroll_row = cursor_visible;
         } else if cursor_visible >= tab.editor_scroll_row + inner_height {
@@ -4597,7 +4609,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
                 .unwrap_or_else(|| "untitled".to_string());
             let prefix = if tab.dirty { "*" } else { "" };
             let label_text = format!(" {prefix}{fname} [x] ");
-            let label_len = label_text.len() as u16;
+            let label_len = label_text.width() as u16;
             if i > 0 {
                 x_offset += 1; // separator
             }
@@ -4614,26 +4626,33 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
     frame.render_widget(Clear, inner);
     let lang = syntax_lang_for_path(app.open_path().map(|p| p.as_path()));
     let visible_rows = inner.height as usize;
-    let has_tab = app.active_tab().is_some();
-    if has_tab && app.tabs[app.active_tab].visible_rows_map.is_empty() {
+    if app.active_tab().is_some_and(|t| t.visible_rows_map.is_empty()) {
         app.rebuild_visible_rows();
     }
-    let (start_row, lines_src_owned, selection, cursor_row, cursor_col, diagnostics_ref, fold_ranges_ref, folded_starts_ref, visible_rows_map_ref) = if let Some(tab) = app.active_tab() {
+    let (start_row, lines_src, selection, cursor_row, cursor_col, diagnostics_owned, fold_ranges_owned, folded_starts_owned, visible_rows_map_owned) = if let Some(tab) = app.active_tab() {
+        let sr = tab.editor_scroll_row.min(tab.visible_rows_map.len().saturating_sub(1));
+        // Only clone lines up to the highest visible row, not the entire buffer
+        let max_row = tab.visible_rows_map.iter().copied().max().unwrap_or(0);
+        let all_lines = tab.editor.lines();
+        let lines: Vec<String> = all_lines[..all_lines.len().min(max_row + 1)].to_vec();
         (
-            tab.editor_scroll_row.min(tab.visible_rows_map.len().saturating_sub(1)),
-            tab.editor.lines().to_vec(),
+            sr,
+            lines,
             tab.editor.selection_range(),
             tab.editor.cursor().0,
             tab.editor.cursor().1,
-            &tab.diagnostics as &[LspDiagnostic],
-            &tab.fold_ranges as &[FoldRange],
-            &tab.folded_starts,
-            &tab.visible_rows_map as &[usize],
+            tab.diagnostics.clone(),
+            tab.fold_ranges.clone(),
+            tab.folded_starts.clone(),
+            tab.visible_rows_map.clone(),
         )
     } else {
-        (0, vec![String::new()], None, 0, 0, &[] as &[LspDiagnostic], &[] as &[FoldRange], &HashSet::new() as &HashSet<usize>, &[0usize] as &[usize])
+        (0, vec![String::new()], None, 0, 0, Vec::new(), Vec::new(), HashSet::new(), vec![0usize])
     };
-    let lines_src = &lines_src_owned;
+    let diagnostics_ref = &diagnostics_owned as &[LspDiagnostic];
+    let fold_ranges_ref = &fold_ranges_owned as &[FoldRange];
+    let folded_starts_ref = &folded_starts_owned;
+    let visible_rows_map_ref = &visible_rows_map_owned as &[usize];
     let inner_w = inner.width as usize;
     let blank_line = Line::from(Span::styled(
         " ".repeat(inner_w),
@@ -4669,7 +4688,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
             "  "
         };
         spans.push(Span::styled(
-            fold_indicator.to_string(),
+            fold_indicator,
             Style::default()
                 .fg(theme.border)
                 .add_modifier(Modifier::BOLD),
@@ -4683,14 +4702,11 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
                 "info" => Color::Cyan,
                 _ => Color::Blue,
             };
-            spans.push(Span::styled(
-                "●".to_string(),
-                Style::default().fg(color),
-            ));
+            spans.push(Span::styled("●", Style::default().fg(color)));
         } else {
-            spans.push(Span::raw(" ".to_string()));
+            spans.push(Span::raw(" "));
         }
-        spans.push(Span::raw(" ".to_string()));
+        spans.push(Span::raw(" "));
         let hl = highlight_line(&lines_src[row], lang, &theme);
         spans.extend(hl.spans);
         let hl = Line::from(spans);
@@ -4704,7 +4720,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
         } else {
             hl
         };
-        let hl = if row_has_selection(row, lines_src[row].chars().count(), selection) {
+        let hl = if selection.is_some() && row_has_selection(row, lines_src[row].chars().count(), selection) {
             hl.patch_style(Style::default().bg(theme.selection))
         } else {
             hl
@@ -4763,13 +4779,6 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
                     .saturating_add(cursor_x as u16),
                 inner.y.saturating_add(cursor_y as u16),
             ));
-        }
-    }
-
-    // Show diagnostic message for cursor line
-    if app.focus == Focus::Editor {
-        if let Some(diag) = diagnostics_ref.iter().find(|d| d.line == cursor_row + 1) {
-            app.status = format!("[{}] {}", diag.severity, diag.message);
         }
     }
 
@@ -5273,6 +5282,7 @@ fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io
         app.poll_lsp();
         app.poll_fs_changes()?;
         app.poll_autosave()?;
+        app.update_status_for_cursor();
         terminal.draw(|f| draw(&mut app, f))?;
         if app.quit {
             return Ok(());
@@ -5381,6 +5391,15 @@ fn main() -> io::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
+    // Restore terminal on panic so it doesn't get stuck in raw mode
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        original_hook(info);
+    }));
+
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
 
