@@ -1,6 +1,6 @@
 # lazyide
 
-Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](https://github.com/Adembc/lazyssh) — a lightweight terminal-native IDE built with Rust and [ratatui](https://ratatui.rs). Provides file tree navigation, tabbed editing, LSP integration (rust-analyzer), syntax highlighting, code folding, project search (ripgrep), and a theme system.
+Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](https://github.com/Adembc/lazyssh) — a lightweight terminal-native IDE built with Rust and [ratatui](https://ratatui.rs). Provides file tree navigation, tabbed editing, LSP integration (rust-analyzer), syntax highlighting, code folding, project search (ripgrep), customizable keybindings, and a theme system.
 
 ![demo](demo.gif)
 
@@ -11,6 +11,7 @@ Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](ht
 - **Code folding**: brace-based (Rust, JS, Go), indentation-based (Python), tag-based (HTML/XML)
 - **Bracket pair colorization**: `{}`, `()`, `[]` colored by nesting depth (3-color cycle per theme)
 - **27 themes**: loaded from `themes/*.json`, with live preview browser (`F5` > Theme). Falls back to built-in dark theme if none found
+- **Customizable keybindings**: remap ~40 actions via `~/.config/lazyide/keybinds.json` or the in-app keybind editor (command palette > "Keybind Editor")
 - **Git branch**: shown in the top bar when inside a git repo
 - **Line numbers**: displayed in the editor gutter with diagnostic markers
 
