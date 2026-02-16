@@ -117,9 +117,15 @@ struct Theme {
     bg: Color,
     bg_alt: Color,
     fg: Color,
+    fg_muted: Color,
     border: Color,
     accent: Color,
     selection: Color,
+    comment: Color,
+    syntax_string: Color,
+    syntax_number: Color,
+    syntax_tag: Color,
+    syntax_attribute: Color,
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +134,8 @@ struct ThemeFile {
     #[serde(rename = "type")]
     theme_type: String,
     colors: ThemeColors,
+    #[serde(default)]
+    syntax: Option<ThemeSyntaxColors>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,10 +145,24 @@ struct ThemeColors {
     background_alt: String,
     foreground: String,
     #[serde(rename = "foregroundMuted")]
-    _foreground_muted: String,
+    foreground_muted: String,
     border: String,
     accent: String,
     selection: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ThemeSyntaxColors {
+    #[serde(default)]
+    comment: Option<String>,
+    #[serde(default)]
+    string: Option<String>,
+    #[serde(default)]
+    number: Option<String>,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    attribute: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -4121,10 +4143,10 @@ fn highlight_line(line: &str, lang: SyntaxLang, theme: &Theme) -> Line<'static> 
         return Line::from(vec![Span::styled(line.to_string(), base)]);
     }
     let keyword_style = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD);
-    let string_style = Style::default().fg(Color::Rgb(156, 220, 140));
-    let number_style = Style::default().fg(Color::Rgb(181, 206, 168));
-    let comment_style = Style::default().fg(theme.border);
-    let heading_style = Style::default().fg(Color::Rgb(86, 156, 214)).add_modifier(Modifier::BOLD);
+    let string_style = Style::default().fg(theme.syntax_string);
+    let number_style = Style::default().fg(theme.syntax_number);
+    let comment_style = Style::default().fg(theme.comment);
+    let heading_style = Style::default().fg(theme.syntax_tag).add_modifier(Modifier::BOLD);
 
     if lang == SyntaxLang::Markdown {
         if line.starts_with('#') {
@@ -4136,8 +4158,8 @@ fn highlight_line(line: &str, lang: SyntaxLang, theme: &Theme) -> Line<'static> 
         let mut spans: Vec<Span<'static>> = Vec::new();
         let mut i = 0usize;
         let bytes = line.as_bytes();
-        let tag_style = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD);
-        let attr_style = Style::default().fg(Color::Rgb(78, 201, 176));
+        let tag_style = Style::default().fg(theme.syntax_tag).add_modifier(Modifier::BOLD);
+        let attr_style = Style::default().fg(theme.syntax_attribute);
         while i < bytes.len() {
             if line[i..].starts_with("<!--") {
                 spans.push(Span::styled(line[i..].to_string(), comment_style));
@@ -4369,6 +4391,33 @@ fn save_persisted_state(state: &PersistedState) -> io::Result<()> {
     fs::write(path, raw)
 }
 
+fn theme_from_file(tf: ThemeFile) -> Theme {
+    let syn = tf.syntax.as_ref();
+    let border_color = color_from_hex(&tf.colors.border, Color::Rgb(127, 122, 88));
+    let fg_muted = color_from_hex(&tf.colors.foreground_muted, Color::Rgb(100, 100, 120));
+    Theme {
+        name: tf.name,
+        theme_type: tf.theme_type,
+        bg: color_from_hex(&tf.colors.background, Color::Rgb(20, 22, 31)),
+        bg_alt: color_from_hex(&tf.colors.background_alt, Color::Rgb(25, 28, 39)),
+        fg: color_from_hex(&tf.colors.foreground, Color::Rgb(215, 213, 189)),
+        fg_muted,
+        border: border_color,
+        accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
+        selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
+        comment: syn.and_then(|s| s.comment.as_ref())
+            .map_or(fg_muted, |c| color_from_hex(c, fg_muted)),
+        syntax_string: syn.and_then(|s| s.string.as_ref())
+            .map_or(Color::Rgb(156, 220, 140), |c| color_from_hex(c, Color::Rgb(156, 220, 140))),
+        syntax_number: syn.and_then(|s| s.number.as_ref())
+            .map_or(Color::Rgb(181, 206, 168), |c| color_from_hex(c, Color::Rgb(181, 206, 168))),
+        syntax_tag: syn.and_then(|s| s.tag.as_ref())
+            .map_or(Color::Rgb(86, 156, 214), |c| color_from_hex(c, Color::Rgb(86, 156, 214))),
+        syntax_attribute: syn.and_then(|s| s.attribute.as_ref())
+            .map_or(Color::Rgb(78, 201, 176), |c| color_from_hex(c, Color::Rgb(78, 201, 176))),
+    }
+}
+
 fn load_themes() -> Vec<Theme> {
     let mut themes = Vec::new();
 
@@ -4398,16 +4447,7 @@ fn load_themes() -> Vec<Theme> {
             let Ok(tf) = serde_json::from_str::<ThemeFile>(&raw) else {
                 continue;
             };
-            themes.push(Theme {
-                name: tf.name,
-                theme_type: tf.theme_type,
-                bg: color_from_hex(&tf.colors.background, Color::Rgb(20, 22, 31)),
-                bg_alt: color_from_hex(&tf.colors.background_alt, Color::Rgb(25, 28, 39)),
-                fg: color_from_hex(&tf.colors.foreground, Color::Rgb(215, 213, 189)),
-                border: color_from_hex(&tf.colors.border, Color::Rgb(127, 122, 88)),
-                accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
-                selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
-            });
+            themes.push(theme_from_file(tf));
         }
         // Stop after the first directory that yields themes
         if !themes.is_empty() {
@@ -4424,16 +4464,7 @@ fn load_themes() -> Vec<Theme> {
         for file in files {
             let Some(raw) = file.contents_utf8() else { continue };
             let Ok(tf) = serde_json::from_str::<ThemeFile>(raw) else { continue };
-            themes.push(Theme {
-                name: tf.name,
-                theme_type: tf.theme_type,
-                bg: color_from_hex(&tf.colors.background, Color::Rgb(20, 22, 31)),
-                bg_alt: color_from_hex(&tf.colors.background_alt, Color::Rgb(25, 28, 39)),
-                fg: color_from_hex(&tf.colors.foreground, Color::Rgb(215, 213, 189)),
-                border: color_from_hex(&tf.colors.border, Color::Rgb(127, 122, 88)),
-                accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
-                selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
-            });
+            themes.push(theme_from_file(tf));
         }
     }
     themes.sort_by_key(|t| (t.theme_type != "dark", t.name.to_ascii_lowercase()));
@@ -4573,7 +4604,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
                 }
                 s
             } else {
-                let mut s = Style::default().fg(theme.border);
+                let mut s = Style::default().fg(theme.fg_muted);
                 if tab.is_preview {
                     s = s.add_modifier(Modifier::ITALIC);
                 }
@@ -4674,7 +4705,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
         let line_num_style = if row == cursor_row {
             Style::default().fg(theme.accent)
         } else {
-            Style::default().fg(theme.border)
+            Style::default().fg(theme.fg_muted)
         };
         spans.push(Span::styled(line_num, line_num_style));
 
@@ -4690,7 +4721,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
         spans.push(Span::styled(
             fold_indicator,
             Style::default()
-                .fg(theme.border)
+                .fg(theme.fg_muted)
                 .add_modifier(Modifier::BOLD),
         ));
 
@@ -4739,7 +4770,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
             let mut spans = hl.spans;
             spans.push(Span::styled(
                 format!("  ... [{} lines]", folded),
-                Style::default().fg(theme.border),
+                Style::default().fg(theme.fg_muted),
             ));
             lines_out.push(Line::from(spans));
         } else {
@@ -4776,7 +4807,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
                     );
                     let ghost_span = Span::styled(
                         ghost.clone(),
-                        Style::default().fg(theme.border),
+                        Style::default().fg(theme.fg_muted),
                     );
                     frame.render_widget(Paragraph::new(Line::from(vec![ghost_span])), ghost_area);
                 }
@@ -4864,13 +4895,13 @@ fn render_menu(app: &mut App, frame: &mut Frame<'_>) {
     frame.render_widget(Clear, area);
     let mut items: Vec<ListItem> = Vec::new();
     items.push(ListItem::new(Line::from(vec![
-        Span::styled("Query: ", Style::default().fg(theme.border)),
+        Span::styled("Query: ", Style::default().fg(theme.fg_muted)),
         Span::styled(app.menu_query.clone(), Style::default().fg(theme.fg)),
     ])));
     if app.menu_results.is_empty() {
         items.push(ListItem::new(Line::from(Span::styled(
             "No commands",
-            Style::default().fg(theme.border),
+            Style::default().fg(theme.fg_muted),
         ))));
     }
     let list_items: Vec<ListItem> = app
@@ -4939,14 +4970,14 @@ fn render_file_picker(app: &mut App, frame: &mut Frame<'_>) {
     frame.render_widget(Clear, area);
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled("Query: ", Style::default().fg(theme.border)),
+        Span::styled("Query: ", Style::default().fg(theme.fg_muted)),
         Span::styled(app.file_picker_query.clone(), Style::default().fg(theme.fg)),
     ]));
     lines.push(Line::from(""));
     if app.file_picker_results.is_empty() {
         lines.push(Line::from(Span::styled(
             "No matching files",
-            Style::default().fg(theme.border),
+            Style::default().fg(theme.fg_muted),
         )));
     } else {
         for (idx, path) in app.file_picker_results.iter().take(25).enumerate() {
@@ -5439,9 +5470,15 @@ mod syntax_and_lang_tests {
             bg: Color::Rgb(30, 30, 30),
             bg_alt: Color::Rgb(40, 40, 40),
             fg: Color::Rgb(220, 220, 220),
+            fg_muted: Color::Rgb(100, 100, 120),
             border: Color::Rgb(100, 100, 100),
             accent: Color::Rgb(86, 156, 214),
             selection: Color::Rgb(60, 60, 60),
+            comment: Color::Rgb(100, 100, 120),
+            syntax_string: Color::Rgb(156, 220, 140),
+            syntax_number: Color::Rgb(181, 206, 168),
+            syntax_tag: Color::Rgb(86, 156, 214),
+            syntax_attribute: Color::Rgb(78, 201, 176),
         }
     }
 
@@ -6440,38 +6477,31 @@ mod theme_and_persistence_tests {
 
     #[test]
     fn test_theme_conversion_valid_colors() {
-        let json = r##"{"name":"Conversion Test","type":"dark","colors":{"background":"#1a1b26","backgroundAlt":"#16161e","foreground":"#a9b1d6","foregroundMuted":"#565f89","border":"#414868","accent":"#7aa2f7","selection":"#364a82"}}"##;
+        let json = r##"{"name":"Conversion Test","type":"dark","colors":{"background":"#1a1b26","backgroundAlt":"#16161e","foreground":"#a9b1d6","foregroundMuted":"#565f89","border":"#414868","accent":"#7aa2f7","selection":"#364a82"},"syntax":{"comment":"#565f89","string":"#9ece6a","number":"#ff9e64","tag":"#7aa2f7","attribute":"#73daca"}}"##;
         let tf: ThemeFile = serde_json::from_str(json).unwrap();
-        let theme = Theme {
-            name: tf.name.clone(), theme_type: tf.theme_type.clone(),
-            bg: color_from_hex(&tf.colors.background, Color::Rgb(20, 22, 31)),
-            bg_alt: color_from_hex(&tf.colors.background_alt, Color::Rgb(25, 28, 39)),
-            fg: color_from_hex(&tf.colors.foreground, Color::Rgb(215, 213, 189)),
-            border: color_from_hex(&tf.colors.border, Color::Rgb(127, 122, 88)),
-            accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
-            selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
-        };
+        let theme = theme_from_file(tf);
         assert_eq!(theme.bg, Color::Rgb(26, 27, 38));
         assert_eq!(theme.fg, Color::Rgb(169, 177, 214));
         assert_eq!(theme.accent, Color::Rgb(122, 162, 247));
+        assert_eq!(theme.fg_muted, Color::Rgb(86, 95, 137));
+        assert_eq!(theme.comment, Color::Rgb(86, 95, 137));
+        assert_eq!(theme.syntax_string, Color::Rgb(158, 206, 106));
+        assert_eq!(theme.syntax_number, Color::Rgb(255, 158, 100));
+        assert_eq!(theme.syntax_tag, Color::Rgb(122, 162, 247));
+        assert_eq!(theme.syntax_attribute, Color::Rgb(115, 218, 202));
     }
 
     #[test]
     fn test_theme_conversion_invalid_colors_use_fallback() {
         let json = r##"{"name":"Fallback Test","type":"light","colors":{"background":"invalid","backgroundAlt":"not-hex","foreground":"short","foregroundMuted":"#000000","border":"","accent":"notacolor","selection":"#ffffff"}}"##;
         let tf: ThemeFile = serde_json::from_str(json).unwrap();
-        let theme = Theme {
-            name: tf.name.clone(), theme_type: tf.theme_type.clone(),
-            bg: color_from_hex(&tf.colors.background, Color::Rgb(20, 22, 31)),
-            bg_alt: color_from_hex(&tf.colors.background_alt, Color::Rgb(25, 28, 39)),
-            fg: color_from_hex(&tf.colors.foreground, Color::Rgb(215, 213, 189)),
-            border: color_from_hex(&tf.colors.border, Color::Rgb(127, 122, 88)),
-            accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
-            selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
-        };
+        let theme = theme_from_file(tf);
         assert_eq!(theme.bg, Color::Rgb(20, 22, 31));
         assert_eq!(theme.border, Color::Rgb(127, 122, 88));
         assert_eq!(theme.selection, Color::Rgb(255, 255, 255));
+        // No syntax section → falls back to defaults
+        assert_eq!(theme.syntax_string, Color::Rgb(156, 220, 140));
+        assert_eq!(theme.syntax_number, Color::Rgb(181, 206, 168));
     }
 
     // Note: load_themes() tests that use set_current_dir are omitted because
