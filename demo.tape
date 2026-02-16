@@ -18,9 +18,6 @@ Hide
 Type "rm -f ~/.config/lazyide/autosave/*.autosave"
 Enter
 Sleep 300ms
-Type "export LAZYIDE_VHS=1"
-Enter
-Sleep 300ms
 Type "export TERM=xterm-256color"
 Enter
 Sleep 300ms
@@ -60,8 +57,8 @@ Sleep 300ms
 Ctrl+j
 Sleep 1.5s
 
-# Unfold it
-Ctrl+k
+# Unfold it (Ctrl+J toggles)
+Ctrl+j
 Sleep 1.5s
 
 # Scroll to mixed_brackets and fold it
@@ -71,11 +68,11 @@ Ctrl+j
 Sleep 1.5s
 
 # Unfold it
-Ctrl+k
+Ctrl+j
 Sleep 1.5s
 
 # Switch to Dark Mech theme via command palette
-Ctrl+e
+Ctrl+p
 Sleep 600ms
 Type "theme"
 Sleep 400ms
@@ -93,7 +90,7 @@ Enter
 Sleep 1.5s
 
 # Open main.rs via quick open (show tabs)
-Ctrl+p
+Ctrl+o
 Sleep 600ms
 Type "main"
 Sleep 400ms

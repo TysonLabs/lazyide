@@ -39,6 +39,7 @@ Add syntax highlighting and bracket pair colors for a polished experience:
     "foregroundMuted": "#565f89",
     "border": "#3b4261",
     "accent": "#7aa2f7",
+    "accentSecondary": "#73daca",
     "selection": "#33467c",
     "yellow": "#e0af68",
     "purple": "#bb9af7",
@@ -54,6 +55,7 @@ Add syntax highlighting and bracket pair colors for a polished experience:
 }
 ```
 
+- `accentSecondary` — used for keybind highlights in the help screen (falls back to a blue default)
 - `yellow`, `purple`, `cyan` — used for bracket pair colorization (nesting depth 1, 2, 3)
 - `syntax` — controls keyword, string, number, tag, and attribute highlighting
 
@@ -61,7 +63,7 @@ Add syntax highlighting and bracket pair colors for a polished experience:
 
 1. Fork this repository
 2. Add your theme as `themes/your-theme-name.json` (use kebab-case)
-3. Test it: `cargo run`, then press `F5` and select your theme
+3. Test it: `cargo run`, then press `Ctrl+P` and select "Theme Picker"
 4. Submit a pull request
 
 ### Tips

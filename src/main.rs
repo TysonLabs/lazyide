@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 use arboard::Clipboard;
 use ratatui::crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    KeyModifiers, KeyboardEnhancementFlags, MouseButton, MouseEvent, MouseEventKind,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -59,6 +60,7 @@ enum PromptMode {
     FindInFile,
     FindInProject,
     ReplaceInFile { search: String },
+    GoToLine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +75,7 @@ enum CommandAction {
     ToggleFiles,
     GotoDefinition,
     ReplaceInFile,
+    GoToLine,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +123,7 @@ struct Theme {
     fg_muted: Color,
     border: Color,
     accent: Color,
+    accent_secondary: Color,
     selection: Color,
     comment: Color,
     syntax_string: Color,
@@ -151,6 +155,8 @@ struct ThemeColors {
     foreground_muted: String,
     border: String,
     accent: String,
+    #[serde(default, rename = "accentSecondary")]
+    accent_secondary: Option<String>,
     selection: String,
     #[serde(default)]
     yellow: Option<String>,
@@ -308,6 +314,7 @@ struct App {
     autosave_last_write: Instant,
     replace_after_find: bool,
     git_branch: Option<String>,
+    enhanced_keys: bool,
 }
 
 impl LspClient {
@@ -573,6 +580,7 @@ impl App {
             autosave_last_write: Instant::now(),
             replace_after_find: false,
             git_branch: None,
+            enhanced_keys: false,
         };
         app.git_branch = detect_git_branch(&app.root);
         app.restore_persisted_state();
@@ -786,6 +794,7 @@ impl App {
             CommandAction::ToggleFiles,
             CommandAction::GotoDefinition,
             CommandAction::ReplaceInFile,
+            CommandAction::GoToLine,
         ];
         let q = self.menu_query.to_ascii_lowercase();
         self.menu_results = all
@@ -855,6 +864,13 @@ impl App {
                     mode: PromptMode::FindInFile,
                 });
                 self.replace_after_find = true;
+            }
+            CommandAction::GoToLine => {
+                self.prompt = Some(PromptState {
+                    title: "Go to line".to_string(),
+                    value: String::new(),
+                    mode: PromptMode::GoToLine,
+                });
             }
         }
         Ok(())
@@ -1220,6 +1236,35 @@ impl App {
         self.rebuild_visible_rows();
         self.sync_editor_scroll_guess();
         self.set_status("Unfolded all blocks");
+    }
+
+    fn toggle_fold_at_cursor(&mut self) {
+        let Some(tab) = self.active_tab() else { return; };
+        let (cursor_row, _) = tab.editor.cursor();
+        // Check if cursor is on/in a folded block
+        let mut is_folded = false;
+        for &start in &tab.folded_starts {
+            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start) {
+                if fr.start_line == cursor_row || (fr.start_line <= cursor_row && cursor_row <= fr.end_line) {
+                    is_folded = true;
+                    break;
+                }
+            }
+        }
+        if is_folded {
+            self.unfold_current_block();
+        } else {
+            self.fold_current_block();
+        }
+    }
+
+    fn toggle_fold_all(&mut self) {
+        let Some(tab) = self.active_tab() else { return; };
+        if tab.folded_starts.is_empty() {
+            self.fold_all();
+        } else {
+            self.unfold_all();
+        }
     }
 
     fn ensure_lsp_for_path(&mut self, path: &Path) {
@@ -1885,17 +1930,21 @@ impl App {
                 return Ok(());
             }
             (KeyModifiers::NONE, KeyCode::F(3)) => {
-                self.files_view_open = !self.files_view_open;
-                if !self.files_view_open {
-                    self.focus = Focus::Editor;
-                    self.set_status("Files view hidden");
+                if self.active_tab_mut().is_some_and(|t| t.editor.search_forward(false)) {
+                    self.set_status("Find next");
+                    self.sync_editor_scroll_guess();
                 } else {
-                    self.set_status("Files view shown");
+                    self.set_status("No next match");
                 }
                 return Ok(());
             }
-            (KeyModifiers::NONE, KeyCode::F(5)) => {
-                self.open_command_palette();
+            (KeyModifiers::SHIFT, KeyCode::F(3)) => {
+                if self.active_tab_mut().is_some_and(|t| t.editor.search_back(false)) {
+                    self.set_status("Find previous");
+                    self.sync_editor_scroll_guess();
+                } else {
+                    self.set_status("No previous match");
+                }
                 return Ok(());
             }
             (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
@@ -1941,16 +1990,11 @@ impl App {
                 self.open_command_palette();
                 return Ok(());
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('e'))
-                if std::env::var_os("LAZYIDE_VHS").is_some() =>
-            {
+            (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                 self.open_command_palette();
                 return Ok(());
             }
-            (_, KeyCode::Char('p'))
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::SHIFT) =>
-            {
+            (KeyModifiers::CONTROL, KeyCode::Char('o')) => {
                 self.file_picker_open = true;
                 self.file_picker_query.clear();
                 self.file_picker_index = 0;
@@ -2073,7 +2117,7 @@ impl App {
             (_, KeyCode::Enter) => {
                 let value = prompt.value.trim().to_string();
                 if value.is_empty()
-                    && !matches!(prompt.mode, PromptMode::FindInFile)
+                    && !matches!(prompt.mode, PromptMode::FindInFile | PromptMode::GoToLine)
                 {
                     self.set_status("Name cannot be empty");
                     return Ok(());
@@ -2377,16 +2421,12 @@ impl App {
                 self.unfold_all();
                 return Ok(());
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('j'))
-                if std::env::var_os("LAZYIDE_VHS").is_some() =>
-            {
-                self.fold_current_block();
+            (KeyModifiers::CONTROL, KeyCode::Char('j')) => {
+                self.toggle_fold_at_cursor();
                 return Ok(());
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('k'))
-                if std::env::var_os("LAZYIDE_VHS").is_some() =>
-            {
-                self.unfold_current_block();
+            (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+                self.toggle_fold_all();
                 return Ok(());
             }
             (KeyModifiers::SHIFT, KeyCode::BackTab) => {
@@ -2431,25 +2471,12 @@ impl App {
                 self.request_lsp_completion();
                 return Ok(());
             }
-            (_, KeyCode::Char('g'))
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.modifiers.contains(KeyModifiers::SHIFT) =>
-            {
-                if self.active_tab_mut().is_some_and(|t| t.editor.search_back(false)) {
-                    self.set_status("Find previous");
-                    self.sync_editor_scroll_guess();
-                } else {
-                    self.set_status("No previous match");
-                }
-                return Ok(());
-            }
             (_, KeyCode::Char('g')) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if self.active_tab_mut().is_some_and(|t| t.editor.search_forward(false)) {
-                    self.set_status("Find next");
-                    self.sync_editor_scroll_guess();
-                } else {
-                    self.set_status("No next match");
-                }
+                self.prompt = Some(PromptState {
+                    title: "Go to line".to_string(),
+                    value: String::new(),
+                    mode: PromptMode::GoToLine,
+                });
                 return Ok(());
             }
             (KeyModifiers::CONTROL, KeyCode::Char('/')) => {
@@ -3040,6 +3067,26 @@ impl App {
             PromptMode::ReplaceInFile { search } => {
                 self.replace_in_open_file(&search, &value);
             }
+            PromptMode::GoToLine => {
+                if let Ok(line_num) = value.parse::<usize>() {
+                    if line_num == 0 {
+                        self.set_status("Line number must be >= 1");
+                        return Ok(());
+                    }
+                    let target = line_num.saturating_sub(1);
+                    if let Some(tab) = self.active_tab_mut() {
+                        let max_line = tab.editor.lines().len().saturating_sub(1);
+                        let clamped = target.min(max_line);
+                        tab.editor.cancel_selection();
+                        tab.editor
+                            .move_cursor(tui_textarea::CursorMove::Jump(clamped as u16, 0));
+                    }
+                    self.sync_editor_scroll_guess();
+                    self.set_status(format!("Jumped to line {}", target + 1));
+                } else {
+                    self.set_status("Invalid line number");
+                }
+            }
         }
         Ok(())
     }
@@ -3363,7 +3410,7 @@ impl App {
 
     fn handle_menu_key(&mut self, key: KeyEvent) -> io::Result<()> {
         match (key.modifiers, key.code) {
-            (_, KeyCode::Esc) | (_, KeyCode::Char('q')) | (_, KeyCode::F(5)) => {
+            (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => {
                 self.menu_open = false;
                 self.menu_query.clear();
             }
@@ -3937,6 +3984,7 @@ fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::ToggleFiles => "Toggle Files Pane",
         CommandAction::GotoDefinition => "Go to Definition",
         CommandAction::ReplaceInFile => "Find and Replace",
+        CommandAction::GoToLine => "Go to Line",
     }
 }
 
@@ -4568,6 +4616,8 @@ fn theme_from_file(tf: ThemeFile) -> Theme {
         fg_muted,
         border: border_color,
         accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
+        accent_secondary: tf.colors.accent_secondary.as_ref()
+            .map_or(Color::Rgb(86, 156, 214), |c| color_from_hex(c, Color::Rgb(86, 156, 214))),
         selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
         comment: syn.and_then(|s| s.comment.as_ref())
             .map_or(fg_muted, |c| color_from_hex(c, fg_muted)),
@@ -4997,7 +5047,7 @@ fn draw(app: &mut App, frame: &mut Frame<'_>) {
 
     let modk = primary_mod_label();
     let status = Paragraph::new(format!(
-        "F1/F2 Tabs   F3 Files   F4 Help   F5 Cmd   {modk}+W Close   {modk}+S Save"
+        "{modk}+P Cmd   {modk}+O Open   F4 Help   {modk}+B Files   {modk}+W Close   {modk}+S Save"
     ))
     .style(Style::default().fg(theme.fg).bg(theme.bg_alt))
     .wrap(Wrap { trim: true })
@@ -5268,52 +5318,113 @@ fn render_completion_popup(app: &mut App, frame: &mut Frame<'_>) {
     frame.render_widget(list, area);
 }
 
+fn help_keybind_line<'a>(entries: &[(&str, &str)], key_style: Style, desc_style: Style, sep_style: Style) -> Line<'a> {
+    let mut spans = Vec::new();
+    for (i, (key, desc)) in entries.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  |  ", sep_style));
+        }
+        spans.push(Span::styled(key.to_string(), key_style));
+        spans.push(Span::styled(format!(" {desc}"), desc_style));
+    }
+    Line::from(spans)
+}
+
 fn render_help(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme();
-    let area = centered_rect(74, 74, frame.area());
+    let area = centered_rect(78, 80, frame.area());
     frame.render_widget(Clear, area);
+
     let m = primary_mod_label();
-    let help = vec![
-        "Keyboard".to_string(),
-        format!("{m}+S save | {m}+W close tab | {m}+R refresh | {m}+N new file | {m}+Q quit"),
-        format!("{m}+B toggle files | {m}+Shift+P command palette | {m}+P quick open"),
-        format!("{m}+F find | {m}+H find and replace | {m}+Shift+F search files | {m}+D or {m}+Alt+D go to definition"),
-        format!("{m}+Shift+{{ fold current block | {m}+Shift+}} unfold current block"),
-        "Shift+Alt+Down duplicate line below | Shift+Alt+Up duplicate line above".to_string(),
-        "Shift+Tab dedent line(s)".to_string(),
-        format!("{m}+G find next | {m}+Shift+G find previous"),
-        format!("Tab / {m}+Space / {m}+. completion (Rust LSP, ghost text + Tab accept)"),
-        format!("{m}+Z undo | {m}+Y or {m}+Shift+Z redo"),
-        format!("{m}+A select all | {m}+C copy | {m}+X cut | {m}+V paste | {m}+/ toggle comment"),
-        "F1 prev tab | F2 next tab | F3 toggle files | F4 help | F5 command palette".to_string(),
-        "".to_string(),
-        "Tree".to_string(),
-        "Up/Down or K/J move | Left/H collapse | Right/L/Enter open/toggle".to_string(),
-        format!("Delete -> {m}+D confirm delete"),
-        "".to_string(),
-        "Unsaved Two-Step".to_string(),
-        format!("Quit: {m}+Q then {m}+Q"),
-        format!("Close tab: {m}+W (with dirty check) or Esc when in editor"),
-        "".to_string(),
-        "Theme Browser".to_string(),
-        "Arrows preview live | Enter keep | Esc revert".to_string(),
-        "".to_string(),
-        "Mouse".to_string(),
-        "Single-click file → preview tab | Double-click → sticky tab | Click tab to switch | Click [x] to close".to_string(),
-        "Drag center divider to resize Files/Working panes (persisted)".to_string(),
-        "Right click tree opens CRUD menu (open/new/rename/delete)".to_string(),
-        "Editor: left drag selects text | right click opens edit menu".to_string(),
-        "Editor gutter click toggles fold at that line".to_string(),
-        "".to_string(),
-        "Esc/Q/F4 closes this help.".to_string(),
-    ]
-    .join("\n");
-    let paragraph = Paragraph::new(help)
+    let heading = Style::default().fg(theme.accent).add_modifier(Modifier::BOLD);
+    let key_s = Style::default().fg(theme.accent_secondary);
+    let desc_s = Style::default().fg(theme.fg);
+    let sep_s = Style::default().fg(theme.fg_muted);
+    let muted = Style::default().fg(theme.fg_muted);
+
+    let lines: Vec<Line> = vec![
+        Line::from(Span::styled("Keyboard", heading)),
+        Line::from(""),
+        help_keybind_line(&[
+            (&format!("{m}+S"), "save"), (&format!("{m}+W"), "close tab"),
+            (&format!("{m}+N"), "new file"), (&format!("{m}+Q"), "quit"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+P"), "command palette"), (&format!("{m}+O"), "quick open"),
+            (&format!("{m}+G"), "go to line"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+B"), "toggle files"), (&format!("{m}+R"), "refresh tree"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+F"), "find"), (&format!("{m}+H"), "find & replace"),
+            (&format!("{m}+Shift+F"), "search files"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+D"), "go to definition"), (&format!("{m}+Alt+D"), "go to definition"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+J"), "toggle fold"), (&format!("{m}+U"), "toggle fold all"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+Shift+["), "fold"), (&format!("{m}+Shift+]"), "unfold"),
+            (&format!("{m}+Alt+["), "fold all"), (&format!("{m}+Alt+]"), "unfold all"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            ("Shift+Alt+Down", "dup line down"), ("Shift+Alt+Up", "dup line up"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            ("F3", "find next"), ("Shift+F3", "find prev"), ("Shift+Tab", "dedent"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            ("PageUp/Down", "scroll page"), (&format!("{m}+Home/End"), "start/end of file"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            ("Tab", "completion"), (&format!("{m}+Space"), "completion"), (&format!("{m}+."), "completion"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+Z"), "undo"), (&format!("{m}+Y"), "redo"), (&format!("{m}+Shift+Z"), "redo"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            (&format!("{m}+A"), "select all"), (&format!("{m}+C"), "copy"),
+            (&format!("{m}+X"), "cut"), (&format!("{m}+V"), "paste"), (&format!("{m}+/"), "toggle comment"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            ("F1", "prev tab"), ("F2", "next tab"), ("F4", "help"),
+        ], key_s, desc_s, sep_s),
+        Line::from(""),
+        Line::from(Span::styled("Tree", heading)),
+        Line::from(""),
+        help_keybind_line(&[
+            ("Up/Down/K/J", "move"), ("Left/H", "collapse"), ("Right/L/Enter", "open"),
+        ], key_s, desc_s, sep_s),
+        help_keybind_line(&[
+            ("Delete", &format!("start delete, then {m}+D to confirm")),
+        ], key_s, desc_s, sep_s),
+        Line::from(""),
+        Line::from(Span::styled("Mouse", heading)),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Click", key_s), Span::styled(" file: preview tab", desc_s),
+            Span::styled("  |  ", sep_s),
+            Span::styled("Double-click", key_s), Span::styled(" sticky tab", desc_s),
+        ]),
+        Line::from(vec![
+            Span::styled("Click", key_s), Span::styled(" tab to switch", desc_s),
+            Span::styled("  |  ", sep_s),
+            Span::styled("Click [x]", key_s), Span::styled(" to close", desc_s),
+        ]),
+        Line::from(Span::styled("Drag divider to resize  |  Right-click: context menus  |  Gutter click: fold", muted)),
+        Line::from(""),
+        Line::from(Span::styled("Esc / Q / F4  close this help", muted)),
+    ];
+
+    let paragraph = Paragraph::new(lines)
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(theme.fg).bg(theme.bg_alt))
         .block(
             Block::default()
-                .title("Help")
+                .title(" Help ")
                 .borders(Borders::ALL)
                 .style(Style::default().bg(theme.bg_alt))
                 .border_style(Style::default().fg(theme.accent)),
@@ -5605,10 +5716,19 @@ fn main() -> io::Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
+    let enhanced_keys = ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+    if enhanced_keys {
+        let _ = execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
+
     // Restore terminal on panic so it doesn't get stuck in raw mode
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
         let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         original_hook(info);
     }));
@@ -5616,11 +5736,15 @@ fn main() -> io::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
 
-    let app = App::new(root)?;
+    let mut app = App::new(root)?;
+    app.enhanced_keys = enhanced_keys;
     let result = run_app(terminal, app);
 
     disable_raw_mode()?;
     let mut stdout = io::stdout();
+    if enhanced_keys {
+        let _ = execute!(stdout, PopKeyboardEnhancementFlags);
+    }
     execute!(stdout, LeaveAlternateScreen, DisableMouseCapture)?;
 
     result
@@ -5648,6 +5772,7 @@ mod syntax_and_lang_tests {
             fg_muted: Color::Rgb(100, 100, 120),
             border: Color::Rgb(100, 100, 100),
             accent: Color::Rgb(86, 156, 214),
+            accent_secondary: Color::Rgb(206, 198, 130),
             selection: Color::Rgb(60, 60, 60),
             comment: Color::Rgb(100, 100, 120),
             syntax_string: Color::Rgb(156, 220, 140),

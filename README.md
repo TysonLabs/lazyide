@@ -73,33 +73,34 @@ This detects missing tools (rust-analyzer, ripgrep) and offers to install them a
 ### Global
 
 - `F1` / `F2` previous / next tab
-- `F3` toggle files pane
 - `F4` help
-- `F5` command palette
 - `Ctrl+S` save
 - `Ctrl+W` close active tab (with dirty check)
 - `Ctrl+Q` quit (two-step if unsaved)
 - `Ctrl+B` toggle files pane
 - `Ctrl+R` refresh tree
 - `Ctrl+N` new file
-- `Ctrl+P` quick open file (fuzzy search)
+- `Ctrl+O` quick open file (fuzzy search)
+- `Ctrl+P` command palette (also `Ctrl+Shift+P`)
 - `Ctrl+F` find in current file (regex)
 - `Ctrl+H` find and replace
 - `Ctrl+Shift+F` search in project (ripgrep)
-- `Ctrl+Shift+P` command palette
 - `Tab` focus tree / `Shift+Tab` focus editor
 
 ### Editor
 
 - `Ctrl+Space` or `Ctrl+.` LSP completion (ghost suggestion + Tab accept)
 - `Ctrl+D` go to definition (Rust LSP)
+- `Ctrl+G` go to line
+- `Ctrl+J` toggle fold at cursor
+- `Ctrl+U` toggle fold all / unfold all
 - `Ctrl+Shift+[` / `]` fold / unfold current block
 - `Ctrl+Alt+[` / `]` fold all / unfold all
+- `F3` / `Shift+F3` find next / previous
 - `PageUp` / `PageDown` scroll by page
 - `Ctrl+Home` / `Ctrl+End` go to start / end of file
 - `Shift+Alt+Down` / `Up` duplicate line
 - `Ctrl+Z` undo / `Ctrl+Y` redo
-- `Ctrl+G` / `Ctrl+Shift+G` find next / previous
 - `Ctrl+A` select all
 - `Ctrl+C` copy / `Ctrl+X` cut / `Ctrl+V` paste
 - `Ctrl+/` toggle line comment (language-aware)
