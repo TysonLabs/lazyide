@@ -1,6 +1,6 @@
 # lazyide
 
-Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](https://github.com/Adembc/lazyssh) — a lightweight terminal-native IDE built with Rust and [ratatui](https://ratatui.rs). Provides file tree navigation, tabbed editing, LSP integration (rust-analyzer), syntax highlighting, code folding, project search (ripgrep), customizable keybindings, and a theme system.
+Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](https://github.com/Adembc/lazyssh) — a lightweight terminal-native IDE built with Rust and [ratatui](https://ratatui.rs). Provides file tree navigation, tabbed editing, LSP integration (rust-analyzer), syntax highlighting, code folding, git gutter & file status, indent guides, project search (ripgrep), customizable keybindings, and a theme system.
 
 ![demo](demo.gif)
 
@@ -15,7 +15,10 @@ Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](ht
 - **Project search**: ripgrep-powered search across all files (`Ctrl+Shift+F`)
 - **Tabbed editing**: preview tabs (single-click), sticky tabs (double-click/edit), dirty indicators
 - **File tree**: folders-first sorting, expand/collapse, right-click context menu, draggable divider
-- **Git branch**: shown in the top bar when inside a git repo
+- **Git gutter**: added (`+`), modified (`~`), and deleted (`-`) line markers in the editor gutter via `git diff`
+- **Git file status**: file tree colors files by git status (modified=yellow, added=green, untracked=muted) with parent directory propagation
+- **Indent guides**: vertical guide lines at 4-space tab stops in indented code, with blank-line continuity
+- **Git branch & change summary**: branch name + change counts (`Δ: ~M +A ?U`) shown in the top bar
 - **Autosave & recovery**: dirty buffers saved every 2s, crash recovery on reopen
 - **POSIX trailing newline**: files always saved with a final newline
 
