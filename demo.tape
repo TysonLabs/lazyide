@@ -35,7 +35,8 @@ Enter
 Show
 Sleep 2.5s
 
-# Navigate tree: . > .git > docs > src > brackets.rs
+# Open utils.rs — shows git gutter (+) for added lines and git file status in tree
+# Navigate: . > .git > docs > src > utils.rs
 Down
 Sleep 300ms
 Down
@@ -46,28 +47,75 @@ Right
 Sleep 400ms
 Down
 Sleep 300ms
+Down
+Sleep 300ms
+Down
+Sleep 300ms
+Down
+Sleep 300ms
+
+# Open utils.rs (modified file — yellow in tree, green + gutter markers)
+Enter
+Sleep 2s
+
+# Scroll down slowly to show git gutter + markers and indent guides
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Down
+Sleep 200ms
+Sleep 1s
+
+# Go back to top to see full picture
+Up 12
+Sleep 1.5s
+
+# Open brackets.rs — shows indent guides + bracket colorization
+Tab
+Sleep 300ms
+Up
+Sleep 300ms
 
 # Open brackets.rs
 Enter
-Sleep 1.5s
+Sleep 2s
 
-# Scroll down to depth_0 function and fold it
+# Scroll through to show indent guides at various depths
 Down 5
 Sleep 300ms
 Ctrl+j
 Sleep 1.5s
 
-# Unfold it (Ctrl+J toggles)
+# Unfold
 Ctrl+j
 Sleep 1.5s
 
-# Scroll to mixed_brackets and fold it
+# Scroll to deeply nested section for indent guides
 Down 16
 Sleep 300ms
 Ctrl+j
 Sleep 1.5s
 
-# Unfold it
+# Unfold
 Ctrl+j
 Sleep 1.5s
 
