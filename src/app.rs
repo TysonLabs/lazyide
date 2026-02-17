@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
@@ -8,7 +9,7 @@ use ratatui::layout::Rect;
 
 use crate::keybinds::{KeyAction, KeyBind, KeyBindings};
 use crate::lsp_client::{LspClient, LspCompletionItem};
-use crate::tab::{ProjectSearchHit, Tab};
+use crate::tab::{GitChangeSummary, GitFileStatus, ProjectSearchHit, Tab};
 use crate::theme::Theme;
 use crate::tree_item::TreeItem;
 use crate::types::{CommandAction, Focus, PendingAction, PromptState};
@@ -62,11 +63,16 @@ pub(crate) struct KeybindEditorState {
     pub(crate) actions: Vec<KeyAction>,
 }
 
+pub(crate) struct FsChangeEvent {
+    pub(crate) paths: Vec<PathBuf>,
+    pub(crate) full_refresh: bool,
+}
+
 pub(crate) struct App {
     pub(crate) root: PathBuf,
     pub(crate) tree: Vec<TreeItem>,
     pub(crate) selected: usize,
-    pub(crate) expanded: std::collections::HashSet<PathBuf>,
+    pub(crate) expanded: HashSet<PathBuf>,
     pub(crate) focus: Focus,
     pub(crate) tabs: Vec<Tab>,
     pub(crate) active_tab: usize,
@@ -110,8 +116,10 @@ pub(crate) struct App {
     pub(crate) pending_completion_request: Option<i64>,
     pub(crate) pending_definition_request: Option<i64>,
     pub(crate) fs_watcher: Option<RecommendedWatcher>,
-    pub(crate) fs_rx: Option<Receiver<()>>,
+    pub(crate) fs_rx: Option<Receiver<FsChangeEvent>>,
     pub(crate) fs_refresh_pending: bool,
+    pub(crate) fs_full_refresh_pending: bool,
+    pub(crate) fs_changed_paths: HashSet<PathBuf>,
     pub(crate) last_fs_refresh: Instant,
     pub(crate) autosave_last_write: Instant,
     pub(crate) replace_after_find: bool,
@@ -119,4 +127,6 @@ pub(crate) struct App {
     pub(crate) enhanced_keys: bool,
     pub(crate) keybinds: KeyBindings,
     pub(crate) keybind_editor: KeybindEditorState,
+    pub(crate) git_file_statuses: HashMap<PathBuf, GitFileStatus>,
+    pub(crate) git_change_summary: GitChangeSummary,
 }

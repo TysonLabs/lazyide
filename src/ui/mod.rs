@@ -17,10 +17,11 @@ use crate::app::App;
 use crate::keybinds::KeyAction;
 use crate::lsp_client::LspDiagnostic;
 use crate::syntax::{highlight_line, syntax_lang_for_path};
-use crate::tab::FoldRange;
+use crate::tab::{FoldRange, GitLineStatus};
 use crate::types::Focus;
 use crate::types::PendingAction;
 use crate::util::{relative_path, row_has_selection};
+use helpers::apply_indent_guides;
 use overlays::*;
 
 pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
@@ -65,20 +66,25 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         None => "no file".to_string(),
     };
     let branch_label = app.git_branch.as_deref().unwrap_or("");
-    let top_text = if branch_label.is_empty() {
-        format!(
-            "lazyide   root: {}   file: {}",
-            app.root.display(),
-            file_label
-        )
+    let git_label = if branch_label.is_empty() {
+        String::new()
+    } else if app.git_change_summary.is_clean() {
+        format!("   git: {}", branch_label)
     } else {
         format!(
-            "lazyide   root: {}   branch: {}   file: {}",
-            app.root.display(),
+            "   git: {}   Δ: {} files +{} -{}",
             branch_label,
-            file_label
+            app.git_change_summary.files_changed,
+            app.git_change_summary.insertions,
+            app.git_change_summary.deletions
         )
     };
+    let top_text = format!(
+        "lazyide   root: {}   file: {}{}",
+        app.root.display(),
+        file_label,
+        git_label
+    );
     let top = Paragraph::new(top_text)
         .style(Style::default().fg(theme.fg).bg(theme.bg_alt))
         .block(
@@ -115,7 +121,13 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                         .fg(theme.accent)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme.fg)
+                    let fg = match app.git_file_statuses.get(&item.path) {
+                        Some(crate::tab::GitFileStatus::Modified) => Color::Yellow,
+                        Some(crate::tab::GitFileStatus::Added) => Color::Green,
+                        Some(crate::tab::GitFileStatus::Untracked) => theme.fg_muted,
+                        None => theme.fg,
+                    };
+                    Style::default().fg(fg)
                 };
                 ListItem::new(Line::from(Span::styled(
                     format!("{indent}{icon}{}", item.name),
@@ -250,6 +262,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         folded_starts_owned,
         visible_rows_map_owned,
         bracket_depths_owned,
+        git_line_status_owned,
     ) = if let Some(tab) = app.active_tab() {
         let sr = tab
             .editor_scroll_row
@@ -269,6 +282,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             tab.folded_starts.clone(),
             tab.visible_rows_map.clone(),
             tab.bracket_depths.clone(),
+            tab.git_line_status.clone(),
         )
     } else {
         (
@@ -282,6 +296,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             HashSet::new(),
             vec![0usize],
             Vec::new(),
+            Vec::new(),
         )
     };
     let diagnostics_ref = &diagnostics_owned as &[LspDiagnostic];
@@ -293,6 +308,41 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         " ".repeat(inner_w),
         Style::default().bg(theme.bg),
     ));
+    // Precompute indent depths for visible rows (for indent guides)
+    let indent_depths: Vec<usize> = {
+        let total = lines_src.len();
+        let mut depths = vec![0usize; total];
+        // First pass: compute depth for non-blank lines
+        for i in 0..total {
+            let line = &lines_src[i];
+            let expanded = line.replace('\t', "    ");
+            let leading = expanded.len() - expanded.trim_start_matches(' ').len();
+            if expanded.trim().is_empty() {
+                depths[i] = usize::MAX; // sentinel for blank
+            } else {
+                depths[i] = leading / 4;
+            }
+        }
+        // Second pass: blank lines get min(nearest non-blank above, nearest non-blank below)
+        for i in 0..total {
+            if depths[i] != usize::MAX {
+                continue;
+            }
+            let above = (0..i)
+                .rev()
+                .find(|&j| depths[j] != usize::MAX)
+                .map(|j| depths[j])
+                .unwrap_or(0);
+            let below = ((i + 1)..total)
+                .find(|&j| depths[j] != usize::MAX)
+                .map(|j| depths[j])
+                .unwrap_or(0);
+            depths[i] = above.min(below);
+        }
+        depths
+    };
+    let guide_style = Style::default().fg(theme.fg_muted);
+
     let mut lines_out: Vec<Line> = Vec::with_capacity(visible_rows);
     for visual_row in 0..visible_rows {
         let visible_idx = start_row + visual_row;
@@ -342,12 +392,32 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         } else {
             spans.push(Span::raw(" "));
         }
+        let git_status = git_line_status_owned
+            .get(row)
+            .copied()
+            .unwrap_or(GitLineStatus::None);
+        match git_status {
+            GitLineStatus::Added => {
+                spans.push(Span::styled("+", Style::default().fg(Color::Green)));
+            }
+            GitLineStatus::Modified => {
+                spans.push(Span::styled("~", Style::default().fg(Color::Yellow)));
+            }
+            GitLineStatus::Deleted => {
+                spans.push(Span::styled("-", Style::default().fg(Color::Red)));
+            }
+            GitLineStatus::None => {
+                spans.push(Span::raw(" "));
+            }
+        }
         spans.push(Span::raw(" "));
         let display_line = lines_src[row].replace('\t', "    ");
         let bracket_colors = [theme.bracket_1, theme.bracket_2, theme.bracket_3];
         let bd = bracket_depths_owned.get(row).copied().unwrap_or(0);
         let hl = highlight_line(&display_line, lang, &theme, bd, &bracket_colors);
-        spans.extend(hl.spans);
+        let guide_depth = indent_depths.get(row).copied().unwrap_or(0);
+        let content_spans = apply_indent_guides(hl.spans, guide_depth, guide_style);
+        spans.extend(content_spans);
         // Pad line to full width so stale characters from previous frame are overwritten
         let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         if used < inner_w {

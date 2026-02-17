@@ -15,7 +15,8 @@ use crate::syntax::syntax_lang_for_path;
 use crate::tab::Tab;
 use crate::types::{EditorContextAction, Focus};
 use crate::util::{
-    comment_prefix_for_path, compute_fold_ranges, editor_context_actions, inside,
+    comment_prefix_for_path, compute_fold_ranges, compute_git_change_summary,
+    compute_git_file_statuses, compute_git_line_status, editor_context_actions, inside,
     leading_indent_bytes, relative_path, text_to_lines, to_u16_saturating,
 };
 
@@ -269,6 +270,8 @@ impl App {
             visible_rows_map.push(0);
         }
 
+        let git_line_status = compute_git_line_status(&self.root, &path, visible_rows_map.len());
+
         let tab = Tab {
             path: path.clone(),
             is_preview: as_preview,
@@ -287,6 +290,7 @@ impl App {
             conflict_disk_text: None,
             recovery_prompt_open: false,
             recovery_text: None,
+            git_line_status,
         };
 
         // If opening as preview, replace existing preview tab
@@ -333,6 +337,12 @@ impl App {
         tab.conflict_prompt_open = false;
         tab.conflict_disk_text = None;
         self.clear_autosave_for_open_file();
+        // Refresh git statuses after save
+        let line_count = self.tabs[self.active_tab].editor.lines().len();
+        self.tabs[self.active_tab].git_line_status =
+            compute_git_line_status(&self.root, &path, line_count);
+        self.git_file_statuses = compute_git_file_statuses(&self.root);
+        self.git_change_summary = compute_git_change_summary(&self.root);
         self.set_status(format!(
             "Saved {}",
             relative_path(&self.root, &path).display()

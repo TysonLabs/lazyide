@@ -1,5 +1,5 @@
 use super::{App, CompletionState, ContextMenuState, KeybindEditorState, SearchResultsState};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use arboard::Clipboard;
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::layout::Rect;
 
 use crate::keybinds::{KeyAction, load_keybindings};
@@ -21,12 +21,14 @@ use crate::tab::{FoldRange, Tab};
 use crate::theme::{Theme, load_themes};
 use crate::types::{CommandAction, Focus, PendingAction, PromptMode, PromptState};
 use crate::util::{
-    command_action_label, compute_fold_ranges, detect_git_branch, relative_path, text_to_lines,
+    command_action_label, compute_fold_ranges, compute_git_change_summary,
+    compute_git_file_statuses, compute_git_line_status, detect_git_branch, relative_path,
+    text_to_lines,
 };
 
 impl App {
     pub(crate) const INLINE_GHOST_MIN_PREFIX: usize = 3;
-    pub(crate) const EDITOR_GUTTER_WIDTH: u16 = 10;
+    pub(crate) const EDITOR_GUTTER_WIDTH: u16 = 11;
     pub(crate) const MIN_FILES_PANE_WIDTH: u16 = 18;
     pub(crate) const MIN_EDITOR_PANE_WIDTH: u16 = 28;
     pub(crate) const FS_REFRESH_DEBOUNCE_MS: u64 = 120;
@@ -104,6 +106,8 @@ impl App {
             fs_watcher: None,
             fs_rx: None,
             fs_refresh_pending: false,
+            fs_full_refresh_pending: false,
+            fs_changed_paths: HashSet::new(),
             last_fs_refresh: Instant::now(),
             autosave_last_write: Instant::now(),
             replace_after_find: false,
@@ -118,8 +122,12 @@ impl App {
                 conflict: None,
                 actions: KeyAction::all().to_vec(),
             },
+            git_file_statuses: HashMap::new(),
+            git_change_summary: Default::default(),
         };
         app.git_branch = detect_git_branch(&app.root);
+        app.git_file_statuses = compute_git_file_statuses(&app.root);
+        app.git_change_summary = compute_git_change_summary(&app.root);
         app.restore_persisted_state();
         app.rebuild_tree()?;
         app.start_fs_watcher();
@@ -144,11 +152,15 @@ impl App {
     }
 
     pub(crate) fn start_fs_watcher(&mut self) {
-        let (tx, rx) = mpsc::channel::<()>();
+        let (tx, rx) = mpsc::channel::<super::FsChangeEvent>();
         let mut watcher = match RecommendedWatcher::new(
             move |res: Result<notify::Event, notify::Error>| {
-                if res.is_ok() {
-                    let _ = tx.send(());
+                if let Ok(event) = res {
+                    let full_refresh = matches!(event.kind, EventKind::Any | EventKind::Other);
+                    let _ = tx.send(super::FsChangeEvent {
+                        paths: event.paths,
+                        full_refresh,
+                    });
                 }
             },
             Config::default().with_poll_interval(Duration::from_millis(250)),
@@ -166,14 +178,30 @@ impl App {
         self.fs_rx = Some(rx);
         self.fs_watcher = Some(watcher);
         self.fs_refresh_pending = false;
+        self.fs_full_refresh_pending = false;
+        self.fs_changed_paths.clear();
         self.last_fs_refresh = Instant::now();
     }
 
     pub(crate) fn poll_fs_changes(&mut self) -> io::Result<()> {
         let mut saw_event = false;
         if let Some(rx) = self.fs_rx.as_ref() {
-            while rx.try_recv().is_ok() {
+            while let Ok(change) = rx.try_recv() {
                 saw_event = true;
+                if change.full_refresh {
+                    self.fs_full_refresh_pending = true;
+                }
+                for path in change.paths {
+                    let abs = if path.is_absolute() {
+                        path
+                    } else {
+                        self.root.join(path)
+                    };
+                    if abs.starts_with(self.root.join(".git")) {
+                        self.fs_full_refresh_pending = true;
+                    }
+                    self.fs_changed_paths.insert(abs);
+                }
             }
         }
         if saw_event {
@@ -184,6 +212,8 @@ impl App {
         {
             self.rebuild_tree()?;
             self.git_branch = detect_git_branch(&self.root);
+            self.git_file_statuses = compute_git_file_statuses(&self.root);
+            self.git_change_summary = compute_git_change_summary(&self.root);
             if self.file_picker_open {
                 self.refresh_file_picker_results();
             }
@@ -203,7 +233,30 @@ impl App {
                     self.maybe_flag_external_conflict()?;
                 }
             }
+            // Refresh git line status only for affected tabs; full refresh for ambiguous events.
+            let full_refresh = self.fs_full_refresh_pending || self.fs_changed_paths.is_empty();
+            let root = self.root.clone();
+            let changed = self.fs_changed_paths.clone();
+            for tab in &mut self.tabs {
+                let should_refresh = if full_refresh {
+                    true
+                } else {
+                    changed.iter().any(|p| {
+                        tab.path == *p
+                            || tab
+                                .path
+                                .parent()
+                                .is_some_and(|parent| parent.starts_with(p))
+                    })
+                };
+                if should_refresh {
+                    let line_count = tab.editor.lines().len();
+                    tab.git_line_status = compute_git_line_status(&root, &tab.path, line_count);
+                }
+            }
             self.fs_refresh_pending = false;
+            self.fs_full_refresh_pending = false;
+            self.fs_changed_paths.clear();
             self.last_fs_refresh = Instant::now();
         }
         Ok(())
