@@ -6,14 +6,18 @@ Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](ht
 
 ## Features
 
-- **LSP** (rust-analyzer): diagnostics in gutter + status bar, completion, go-to-definition
+- **LSP** (rust-analyzer): diagnostics in gutter + status bar, completion with ghost suggestions, go-to-definition
 - **Syntax highlighting**: Rust, Python, JS/TS, Go, PHP, CSS/SCSS/SASS, HTML/XML, Shell, JSON/TOML/YAML, Markdown
 - **Code folding**: brace-based (Rust, JS, Go), indentation-based (Python), tag-based (HTML/XML)
 - **Bracket pair colorization**: `{}`, `()`, `[]` colored by nesting depth (3-color cycle per theme)
-- **27 themes**: loaded from `themes/*.json`, with live preview browser (`F5` > Theme). Falls back to built-in dark theme if none found
+- **27 themes**: embedded in binary, with live preview browser (command palette > Theme)
 - **Customizable keybindings**: remap ~40 actions via `~/.config/lazyide/keybinds.json` or the in-app keybind editor (command palette > "Keybind Editor")
+- **Project search**: ripgrep-powered search across all files (`Ctrl+Shift+F`)
+- **Tabbed editing**: preview tabs (single-click), sticky tabs (double-click/edit), dirty indicators
+- **File tree**: folders-first sorting, expand/collapse, right-click context menu, draggable divider
 - **Git branch**: shown in the top bar when inside a git repo
-- **Line numbers**: displayed in the editor gutter with diagnostic markers
+- **Autosave & recovery**: dirty buffers saved every 2s, crash recovery on reopen
+- **POSIX trailing newline**: files always saved with a final newline
 
 ## Install
 
@@ -158,6 +162,13 @@ You can also open the **Keybind Editor** from the command palette (`Ctrl+P` > "K
 - Dirty buffers autosave every 2 seconds
 - Recovery prompt on reopen if autosave exists
 - Conflict prompt if file changes on disk while buffer is dirty: `R` reload, `K` keep local, `D` decide later
+
+## Documentation
+
+See the [docs/](docs/) directory for contributor guides:
+
+- [Architecture](docs/ARCHITECTURE.md) — module structure, data flow, rendering pipeline
+- [Contributing](CONTRIBUTING.md) — how to submit themes, report bugs, and contribute code
 
 ## Contributing
 

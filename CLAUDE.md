@@ -19,21 +19,29 @@ Rust 2024 edition. No custom build scripts, no CI/CD.
 
 ## Architecture
 
-**Single-file monolith:** The entire application is in `src/main.rs` (~8,200 lines). Key sections:
+The app is now modular (library + thin binary launcher):
 
-- **App struct** — Central application state: file tree, editor (tui-textarea), theme, LSP client, fs watcher, UI state
-- **Main event loop** (`run()`) — Polls LSP, fs changes, autosave, then draws UI and handles input
-- **LSP client** (`LspClient`) — Spawns rust-analyzer, handles completion, diagnostics, go-to-definition via stdin/stdout JSON-RPC
-- **File tree** (`TreeItem`, `rebuild_tree()`, `walk_dir()`) — Recursive directory traversal, folders-first sorting
-- **Syntax highlighting** — Lightweight per-language keyword/comment/string coloring for 11+ languages
-- **Theme system** — 27 JSON theme files in `themes/`, loaded at startup, with live preview and persistence
-- **Persistence** — `PersistedState` saves theme preference and pane widths to `~/.config/lazyide/state.json`; autosave buffers every 2 seconds
+- `src/main.rs` — minimal entrypoint (`lazyide::run()`)
+- `src/lib.rs` — runtime entry (`run`, setup flow, terminal lifecycle) and crate wiring
+- `src/app.rs` + `src/app/*` — `App` state + split impls:
+  - `core.rs` (constructor, persistence/autosave/fs poll, folding core helpers)
+  - `input.rs` (top-level key/mouse dispatch)
+  - `input_handlers.rs` (modal/menu/context/keybind handlers + key action routing)
+  - `editor.rs` (editor ops, file open/save/close, clipboard, paging/selection helpers)
+  - `file_tree.rs` (tree build/navigation/context actions)
+  - `search.rs` (find/replace/project search)
+  - `lsp.rs` (LSP lifecycle, diagnostics, completion, definition handling)
+- `src/ui/mod.rs` + `src/ui/overlays.rs` + `src/ui/helpers.rs` — drawing and overlays
+- Shared domain/util modules:
+  - `src/types.rs`, `src/tab.rs`, `src/tree_item.rs`
+  - `src/theme.rs`, `src/syntax.rs`, `src/persistence.rs`, `src/lsp_client.rs`, `src/keybinds.rs`, `src/util.rs`
 
-**Focus model:** `Focus` enum switches between `Tree` and `Editor` panes. Input handling branches on focus state.
+Core model remains the same:
 
-**Key enums:** `Focus`, `SyntaxLang`, `TreeContextAction`, `EditorContextAction`, `KeyAction`
-
-- **Keybinding system** — `KeyAction` enum (~40 remappable actions), `KeyBind` (modifier+keycode with parse/display/match), `KeyBindings` (HashMap<KeyAction, Vec<KeyBind>> with defaults/lookup/conflict detection). Overrides loaded from `~/.config/lazyide/keybinds.json`. In-app keybind editor accessible from command palette
+- **App struct** — central application state (tree/editor/theme/LSP/fs watcher/UI state)
+- **Main event loop** (`run_app`) — poll LSP/fs/autosave, draw, then process events
+- **Focus model** — `Focus::{Tree, Editor}` controls key handling paths
+- **Keybinding system** — `KeyAction`, `KeyBind`, `KeyBindings` with user overrides at `~/.config/lazyide/keybinds.json`
 
 ## External Tool Dependencies
 
@@ -49,7 +57,7 @@ Rust 2024 edition. No custom build scripts, no CI/CD.
 
 ```
 INLINE_GHOST_MIN_PREFIX: 3      // Min chars before showing inline completion
-EDITOR_GUTTER_WIDTH: 4          // Line number gutter width
+EDITOR_GUTTER_WIDTH: 10         // Line number + fold marker gutter width
 MIN_FILES_PANE_WIDTH: 18
 MIN_EDITOR_PANE_WIDTH: 28
 FS_REFRESH_DEBOUNCE_MS: 120
