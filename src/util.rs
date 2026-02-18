@@ -38,11 +38,10 @@ pub(crate) fn pending_hint(pending: &PendingAction) -> String {
             )
         }
         PendingAction::Delete(path) => format!(
-            "Pending delete {}: {}+D confirm, Esc cancel",
+            "Pending delete {}: Enter/Y confirm, Esc/N cancel",
             path.file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.display().to_string()),
-            m
         ),
     }
 }

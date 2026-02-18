@@ -17,6 +17,20 @@ use crate::util::{
 };
 
 impl App {
+    pub(crate) fn open_tree_context_menu_at(&mut self, column: u16, row: u16) {
+        if let Some(idx) = self.tree_index_from_mouse(row) {
+            self.selected = idx;
+            self.context_menu.target = Some(self.tree[idx].path.clone());
+            self.context_menu.index = 0;
+        } else {
+            // Right-click on empty tree space: open context menu at root for create actions.
+            self.context_menu.target = Some(self.root.clone());
+            self.context_menu.index = 1; // New File
+        }
+        self.context_menu.pos = (column, row);
+        self.context_menu.open = true;
+    }
+
     fn left_click_outside(mouse: MouseEvent, rect: Rect) -> bool {
         matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
             && !inside(mouse.column, mouse.row, rect)
@@ -174,8 +188,15 @@ impl App {
     pub(crate) fn handle_pending_key(&mut self, key: KeyEvent) -> io::Result<bool> {
         match (&self.pending, key.modifiers, key.code) {
             (PendingAction::None, _, _) => Ok(false),
-            (PendingAction::Quit, KeyModifiers::CONTROL, KeyCode::Char('q')) => {
+            (PendingAction::Quit, KeyModifiers::CONTROL, KeyCode::Char('q' | 'Q')) => {
                 self.quit = true;
+                Ok(true)
+            }
+            (_, mods, KeyCode::Char('q' | 'Q'))
+                if mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT) =>
+            {
+                self.pending = PendingAction::None;
+                self.run_key_action(KeyAction::Quit)?;
                 Ok(true)
             }
             (PendingAction::ClosePrompt, mods, KeyCode::Char('s'))
@@ -204,10 +225,27 @@ impl App {
                 self.set_status("Close canceled");
                 Ok(true)
             }
-            (PendingAction::Delete(path), KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            (PendingAction::Delete(path), mods, KeyCode::Char('d' | 'D'))
+                if mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT) =>
+            {
                 let target = path.clone();
                 self.pending = PendingAction::None;
                 self.delete_path(target)?;
+                Ok(true)
+            }
+            (PendingAction::Delete(path), KeyModifiers::NONE, KeyCode::Enter)
+            | (PendingAction::Delete(path), KeyModifiers::NONE, KeyCode::Char('y'))
+            | (PendingAction::Delete(path), KeyModifiers::NONE, KeyCode::Char('Y')) => {
+                let target = path.clone();
+                self.pending = PendingAction::None;
+                self.delete_path(target)?;
+                Ok(true)
+            }
+            (PendingAction::Delete(_), KeyModifiers::NONE, KeyCode::Char('n'))
+            | (PendingAction::Delete(_), KeyModifiers::NONE, KeyCode::Char('N'))
+            | (PendingAction::Delete(_), KeyModifiers::NONE, KeyCode::Esc) => {
+                self.pending = PendingAction::None;
+                self.set_status("Delete canceled");
                 Ok(true)
             }
             (_, KeyModifiers::NONE, KeyCode::Esc) => {
@@ -910,6 +948,26 @@ impl App {
     }
 
     pub(crate) fn handle_context_menu_mouse(&mut self, mouse: MouseEvent) -> io::Result<()> {
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+            // Reopen context menu on right-click so consecutive right-clicks retarget/reposition.
+            self.context_menu.open = false;
+            if inside(mouse.column, mouse.row, self.tree_rect) {
+                self.open_tree_context_menu_at(mouse.column, mouse.row);
+            }
+            return Ok(());
+        }
+        if matches!(
+            mouse.kind,
+            MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left)
+        ) {
+            if inside(mouse.column, mouse.row, self.context_menu.rect) {
+                let row = mouse.row.saturating_sub(self.context_menu.rect.y + 1) as usize;
+                if row < context_actions().len() {
+                    self.context_menu.index = row;
+                }
+            }
+            return Ok(());
+        }
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return Ok(());
         }
@@ -927,6 +985,21 @@ impl App {
     }
 
     pub(crate) fn handle_editor_context_menu_mouse(&mut self, mouse: MouseEvent) -> io::Result<()> {
+        if matches!(
+            mouse.kind,
+            MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left)
+        ) {
+            if inside(mouse.column, mouse.row, self.editor_context_menu_rect) {
+                let row = mouse
+                    .row
+                    .saturating_sub(self.editor_context_menu_rect.y + 1)
+                    as usize;
+                if row < editor_context_actions().len() {
+                    self.editor_context_menu_index = row;
+                }
+            }
+            return Ok(());
+        }
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return Ok(());
         }

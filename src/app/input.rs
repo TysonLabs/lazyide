@@ -9,7 +9,7 @@ use tui_textarea::Input;
 
 use crate::keybinds::KeyScope;
 use crate::types::{Focus, PendingAction};
-use crate::util::{inside, primary_mod_label, to_u16_saturating};
+use crate::util::{inside, to_u16_saturating};
 
 impl App {
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> io::Result<()> {
@@ -93,11 +93,14 @@ impl App {
             (KeyModifiers::NONE, KeyCode::Delete) => {
                 if self.focus == Focus::Tree {
                     if let Some(item) = self.selected_item().cloned() {
+                        if item.path == self.root {
+                            self.set_status("Cannot delete project root");
+                            return Ok(());
+                        }
                         self.pending = PendingAction::Delete(item.path.clone());
                         self.set_status(format!(
-                            "Delete {} ? Press {}+D to confirm.",
+                            "Delete {} ? Press Enter to confirm, Esc to cancel.",
                             item.name,
-                            primary_mod_label()
                         ));
                     }
                     return Ok(());
@@ -120,6 +123,12 @@ impl App {
         }
 
         if self.prompt.is_some() {
+            return Ok(());
+        }
+        if matches!(
+            self.pending,
+            PendingAction::ClosePrompt | PendingAction::Delete(_)
+        ) {
             return Ok(());
         }
         if self
@@ -210,13 +219,7 @@ impl App {
                     }
                 }
                 MouseEventKind::Down(MouseButton::Right) => {
-                    if let Some(idx) = self.tree_index_from_mouse(mouse.row) {
-                        self.selected = idx;
-                        self.context_menu.target = Some(self.tree[idx].path.clone());
-                        self.context_menu.index = 0;
-                        self.context_menu.pos = (mouse.column, mouse.row);
-                        self.context_menu.open = true;
-                    }
+                    self.open_tree_context_menu_at(mouse.column, mouse.row);
                 }
                 MouseEventKind::ScrollDown => {
                     if self.selected + 1 < self.tree.len() {

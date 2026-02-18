@@ -6,6 +6,7 @@ use ratatui::widgets::{Clear, List, ListItem, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::keybinds::KeyAction;
+use crate::types::PendingAction;
 use crate::util::{
     command_action_label, context_actions, context_label, editor_context_actions,
     editor_context_label, primary_mod_label, relative_path,
@@ -320,7 +321,6 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
     frame.render_widget(Clear, area);
 
     let kb = &app.keybinds;
-    let m = primary_mod_label();
     let heading = Style::default()
         .fg(theme.accent)
         .add_modifier(Modifier::BOLD);
@@ -487,12 +487,7 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
             desc_s,
             sep_s,
         ),
-        help_keybind_line(
-            &[("Delete", &format!("start delete, then {m}+D to confirm"))],
-            key_s,
-            desc_s,
-            sep_s,
-        ),
+        help_keybind_line(&[("Delete", "delete selected item")], key_s, desc_s, sep_s),
         Line::from(""),
         Line::from(Span::styled("Mouse", heading)),
         Line::from(""),
@@ -634,6 +629,26 @@ pub(crate) fn render_close_prompt(app: &mut App, frame: &mut Frame<'_>) {
     ]
     .join("\n");
     render_dialog(area, "Close File", text, theme, frame);
+}
+
+pub(crate) fn render_delete_prompt(app: &mut App, frame: &mut Frame<'_>) {
+    let PendingAction::Delete(path) = &app.pending else {
+        return;
+    };
+    let theme = app.active_theme();
+    let area = centered_rect(64, 28, frame.area());
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+    let text = [
+        format!("Delete '{}' ?", name),
+        "".to_string(),
+        "Enter or Y: Confirm delete".to_string(),
+        "Esc or N: Cancel".to_string(),
+    ]
+    .join("\n");
+    render_dialog(area, "Confirm Delete", text, theme, frame);
 }
 
 pub(crate) fn render_conflict_prompt(app: &mut App, frame: &mut Frame<'_>) {

@@ -1,15 +1,74 @@
 use super::App;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::tree_item::TreeItem;
 use crate::types::{ContextAction, PendingAction, PromptMode, PromptState};
-use crate::util::{
-    collect_all_files, fuzzy_score, primary_mod_label, relative_path, to_u16_saturating,
-};
+use crate::util::{collect_all_files, fuzzy_score, relative_path, to_u16_saturating};
 
 impl App {
+    fn sanitize_entry_name<'a>(&self, value: &'a str) -> Result<&'a str, &'static str> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err("Name cannot be empty");
+        }
+        let mut components = Path::new(trimmed).components();
+        match (components.next(), components.next()) {
+            (Some(Component::Normal(_)), None) => Ok(trimmed),
+            _ => Err("Name must be a single path component"),
+        }
+    }
+
+    fn close_tabs_for_path_prefix(&mut self, path: &Path) {
+        let mut indices: Vec<usize> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, tab)| {
+                if tab.path == path || tab.path.starts_with(path) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        indices.sort_unstable();
+        indices.reverse();
+        for idx in indices {
+            self.close_tab_at(idx);
+        }
+    }
+
+    fn retarget_tabs_for_rename(&mut self, from: &Path, to: &Path) {
+        for tab in &mut self.tabs {
+            if tab.path == from {
+                tab.path = to.to_path_buf();
+                continue;
+            }
+            if let Ok(suffix) = tab.path.strip_prefix(from) {
+                tab.path = to.join(suffix);
+            }
+        }
+    }
+
+    fn retarget_expanded_for_rename(&mut self, from: &Path, to: &Path) {
+        let mut moved = Vec::new();
+        for p in &self.expanded {
+            if p == from {
+                moved.push((p.clone(), to.to_path_buf()));
+                continue;
+            }
+            if let Ok(suffix) = p.strip_prefix(from) {
+                moved.push((p.clone(), to.join(suffix)));
+            }
+        }
+        for (old, new) in moved {
+            self.expanded.remove(&old);
+            self.expanded.insert(new);
+        }
+    }
+
     pub(crate) fn rebuild_tree(&mut self) -> io::Result<()> {
         let selected_path = self.tree.get(self.selected).map(|i| i.path.clone());
         let mut out = Vec::new();
@@ -180,15 +239,23 @@ impl App {
     }
 
     pub(crate) fn delete_path(&mut self, path: PathBuf) -> io::Result<()> {
+        if path == self.root {
+            self.set_status("Cannot delete project root");
+            return Ok(());
+        }
+        if !path.exists() {
+            self.set_status("Path no longer exists");
+            self.rebuild_tree()?;
+            return Ok(());
+        }
         if path.is_dir() {
             fs::remove_dir_all(&path)?;
         } else {
             fs::remove_file(&path)?;
         }
-        // Close any tab that has this path open
-        if let Some(idx) = self.tabs.iter().position(|t| t.path == path) {
-            self.close_tab_at(idx);
-        }
+        // Close any tab at this path or under this directory.
+        self.close_tabs_for_path_prefix(&path);
+        self.expanded.retain(|p| !p.starts_with(&path));
         self.rebuild_tree()?;
         self.set_status(format!("Deleted {}", path.display()));
         Ok(())
@@ -223,12 +290,21 @@ impl App {
     pub(crate) fn apply_prompt(&mut self, mode: PromptMode, value: String) -> io::Result<()> {
         match mode {
             PromptMode::NewFile { parent } => {
-                let target = parent.join(value);
+                let name = match self.sanitize_entry_name(&value) {
+                    Ok(name) => name,
+                    Err(msg) => {
+                        self.set_status(msg);
+                        return Ok(());
+                    }
+                };
+                let target = parent.join(name);
                 if target.exists() {
                     self.set_status("File already exists");
                     return Ok(());
                 }
                 fs::write(&target, b"")?;
+                // Ensure parent is visible after creating from a collapsed directory.
+                self.expanded.insert(parent.clone());
                 self.rebuild_tree()?;
                 self.set_status(format!(
                     "Created {}",
@@ -236,12 +312,21 @@ impl App {
                 ));
             }
             PromptMode::NewFolder { parent } => {
-                let target = parent.join(value);
+                let name = match self.sanitize_entry_name(&value) {
+                    Ok(name) => name,
+                    Err(msg) => {
+                        self.set_status(msg);
+                        return Ok(());
+                    }
+                };
+                let target = parent.join(name);
                 if target.exists() {
                     self.set_status("Folder already exists");
                     return Ok(());
                 }
                 fs::create_dir_all(&target)?;
+                // Ensure parent and new folder are both visible.
+                self.expanded.insert(parent.clone());
                 self.expanded.insert(target.clone());
                 self.rebuild_tree()?;
                 self.set_status(format!(
@@ -250,19 +335,33 @@ impl App {
                 ));
             }
             PromptMode::Rename { target } => {
+                if target == self.root {
+                    self.set_status("Cannot rename project root");
+                    return Ok(());
+                }
                 let Some(parent) = target.parent() else {
                     self.set_status("Cannot rename root");
                     return Ok(());
                 };
-                let renamed = parent.join(value);
+                let name = match self.sanitize_entry_name(&value) {
+                    Ok(name) => name,
+                    Err(msg) => {
+                        self.set_status(msg);
+                        return Ok(());
+                    }
+                };
+                let renamed = parent.join(name);
+                if renamed == target {
+                    self.set_status("Name unchanged");
+                    return Ok(());
+                }
                 if renamed.exists() {
                     self.set_status("Name already exists");
                     return Ok(());
                 }
                 fs::rename(&target, &renamed)?;
-                if let Some(tab) = self.tabs.iter_mut().find(|t| t.path == target) {
-                    tab.path = renamed.clone();
-                }
+                self.retarget_tabs_for_rename(&target, &renamed);
+                self.retarget_expanded_for_rename(&target, &renamed);
                 self.rebuild_tree()?;
                 self.set_status(format!(
                     "Renamed to {}",
@@ -356,6 +455,10 @@ impl App {
                 });
             }
             ContextAction::Rename => {
+                if target == self.root {
+                    self.set_status("Cannot rename project root");
+                    return Ok(());
+                }
                 let default_name = target
                     .file_name()
                     .map(|s| s.to_string_lossy().to_string())
@@ -367,18 +470,154 @@ impl App {
                 });
             }
             ContextAction::Delete => {
+                if target == self.root {
+                    self.set_status("Cannot delete project root");
+                    return Ok(());
+                }
                 self.pending = PendingAction::Delete(target.clone());
                 self.set_status(format!(
-                    "Delete {} ? Press {}+D to confirm.",
+                    "Delete {} ? Press Enter to confirm, Esc to cancel.",
                     target
                         .file_name()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| target.display().to_string()),
-                    primary_mod_label()
                 ));
             }
             ContextAction::Cancel => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    fn new_app(root: &Path) -> App {
+        App::new(root.to_path_buf()).expect("app should initialize")
+    }
+
+    #[test]
+    fn delete_path_rejects_project_root() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let mut app = new_app(root);
+
+        app.delete_path(root.to_path_buf())
+            .expect("delete root should be non-fatal");
+
+        assert!(root.exists());
+        assert_eq!(app.status, "Cannot delete project root");
+    }
+
+    #[test]
+    fn apply_context_action_rejects_rename_root() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let mut app = new_app(root);
+        app.context_menu.target = Some(root.to_path_buf());
+
+        app.apply_context_action(ContextAction::Rename)
+            .expect("rename root should be non-fatal");
+
+        assert!(app.prompt.is_none());
+        assert_eq!(app.status, "Cannot rename project root");
+    }
+
+    #[test]
+    fn apply_context_action_delete_opens_confirmation_state() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let path = root.join("delete_me.txt");
+        fs::write(&path, "hello\n").expect("write file");
+        let mut app = new_app(root);
+        app.context_menu.target = Some(path.clone());
+
+        app.apply_context_action(ContextAction::Delete)
+            .expect("context delete should succeed");
+
+        assert!(path.exists());
+        match &app.pending {
+            PendingAction::Delete(p) => assert_eq!(p, &path),
+            _ => panic!("expected pending delete"),
+        }
+    }
+
+    #[test]
+    fn rename_directory_retargets_descendant_open_tabs() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let old_dir = root.join("old");
+        fs::create_dir_all(&old_dir).expect("create old dir");
+        let old_a = old_dir.join("a.rs");
+        let old_b = old_dir.join("b.rs");
+        fs::write(&old_a, "fn a() {}\n").expect("write a");
+        fs::write(&old_b, "fn b() {}\n").expect("write b");
+
+        let mut app = new_app(root);
+        app.open_file(old_a.clone()).expect("open a");
+        app.open_file(old_b.clone()).expect("open b");
+        assert_eq!(app.tabs.len(), 2);
+
+        app.apply_prompt(
+            PromptMode::Rename {
+                target: old_dir.clone(),
+            },
+            "new".to_string(),
+        )
+        .expect("rename directory");
+
+        let new_dir = root.join("new");
+        assert!(new_dir.is_dir());
+        let new_a = new_dir.join("a.rs");
+        let new_b = new_dir.join("b.rs");
+        assert!(new_a.exists());
+        assert!(new_b.exists());
+        assert!(app.tabs.iter().any(|t| t.path == new_a));
+        assert!(app.tabs.iter().any(|t| t.path == new_b));
+        assert!(!app.tabs.iter().any(|t| t.path == old_a));
+        assert!(!app.tabs.iter().any(|t| t.path == old_b));
+    }
+
+    #[test]
+    fn apply_prompt_new_file_rejects_traversal_name() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let mut app = new_app(root);
+
+        app.apply_prompt(
+            PromptMode::NewFile {
+                parent: root.to_path_buf(),
+            },
+            "../escape.rs".to_string(),
+        )
+        .expect("new file with traversal should be non-fatal");
+
+        assert_eq!(app.status, "Name must be a single path component");
+        assert!(!root.join("../escape.rs").exists());
+    }
+
+    #[test]
+    fn apply_prompt_rename_rejects_nested_name() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("file.txt");
+        fs::write(&file, "x\n").expect("write file");
+        let mut app = new_app(root);
+
+        app.apply_prompt(
+            PromptMode::Rename {
+                target: file.clone(),
+            },
+            "a/b.txt".to_string(),
+        )
+        .expect("rename with nested path should be non-fatal");
+
+        assert_eq!(app.status, "Name must be a single path component");
+        assert!(file.exists());
+        assert!(!root.join("a").join("b.txt").exists());
     }
 }

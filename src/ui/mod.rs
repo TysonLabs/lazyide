@@ -557,6 +557,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     if matches!(app.pending, PendingAction::ClosePrompt) {
         render_close_prompt(app, frame);
     }
+    if matches!(app.pending, PendingAction::Delete(_)) {
+        render_delete_prompt(app, frame);
+    }
     if app.active_tab().is_some_and(|t| t.conflict_prompt_open) {
         render_conflict_prompt(app, frame);
     }

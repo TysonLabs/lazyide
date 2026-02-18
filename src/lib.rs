@@ -97,8 +97,12 @@ pub fn run() -> io::Result<()> {
 fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io::Result<()> {
     loop {
         app.poll_lsp();
-        app.poll_fs_changes()?;
-        app.poll_autosave()?;
+        if let Err(err) = app.poll_fs_changes() {
+            app.set_status(format!("Filesystem update error: {err}"));
+        }
+        if let Err(err) = app.poll_autosave() {
+            app.set_status(format!("Autosave error: {err}"));
+        }
         app.update_status_for_cursor();
         terminal.draw(|f| draw(&mut app, f))?;
         if app.quit {
@@ -106,8 +110,16 @@ fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io
         }
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
-                Event::Key(key) => app.handle_key(key)?,
-                Event::Mouse(mouse) => app.handle_mouse(mouse)?,
+                Event::Key(key) => {
+                    if let Err(err) = app.handle_key(key) {
+                        app.set_status(format!("Action failed: {err}"));
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    if let Err(err) = app.handle_mouse(mouse) {
+                        app.set_status(format!("Action failed: {err}"));
+                    }
+                }
                 _ => {}
             }
         }
