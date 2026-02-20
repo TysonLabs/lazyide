@@ -19,7 +19,7 @@ Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](ht
 - **Git file status**: file tree colors files by git status (modified=yellow, added=green, untracked=muted) with parent directory propagation
 - **Indent guides**: vertical guide lines at 4-space tab stops in indented code, with blank-line continuity
 - **Git branch & change summary**: branch name + change counts (`Δ: ~M +A ?U`) shown in the top bar
-- **Word wrap**: wrapped-line cursor/selection/mouse support, toggle with `Ctrl+Alt+W`
+- **Word wrap**: wrapped-line cursor/selection/mouse support, toggle with `Ctrl+Shift+W`
 - **Autosave & recovery**: dirty buffers saved every 2s, crash recovery on reopen
 - **POSIX trailing newline**: files always saved with a final newline
 
@@ -88,7 +88,7 @@ This detects missing tools (rust-analyzer, ripgrep) and offers to install them a
 - `Ctrl+Q` quit (two-step if unsaved)
 - `Ctrl+B` toggle files pane
 - `Ctrl+R` refresh tree
-- `Ctrl+Alt+W` toggle word wrap
+- `Ctrl+Shift+W` toggle word wrap
 - `Ctrl+N` new file
 - `Ctrl+O` quick open file (fuzzy search)
 - `Ctrl+P` command palette (also `Ctrl+Shift+P`)
