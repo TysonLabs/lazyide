@@ -486,6 +486,7 @@ mod lsp_and_struct_tests {
             dirty: false,
             open_disk_snapshot: None,
             editor_scroll_row: 0,
+            editor_scroll_col: 0,
             fold_ranges: Vec::new(),
             bracket_depths: Vec::new(),
             folded_starts: HashSet::new(),
@@ -517,6 +518,7 @@ mod lsp_and_struct_tests {
             dirty: true,
             open_disk_snapshot: Some("old".to_string()),
             editor_scroll_row: 10,
+            editor_scroll_col: 0,
             fold_ranges: vec![FoldRange {
                 start_line: 5,
                 end_line: 15,

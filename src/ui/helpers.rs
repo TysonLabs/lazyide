@@ -59,6 +59,76 @@ pub(crate) fn themed_block(theme: &Theme) -> Block<'static> {
         .border_style(Style::default().fg(theme.accent))
 }
 
+/// Clip spans to a horizontal window: skip `skip` display columns, then collect up to `width`
+/// display columns. Preserves per-char styles. Uses `UnicodeWidthChar` for display width.
+pub(crate) fn clip_spans_by_columns(
+    spans: Vec<Span<'static>>,
+    skip: usize,
+    width: usize,
+) -> Vec<Span<'static>> {
+    if skip == 0 && width == usize::MAX {
+        return spans;
+    }
+    // Flatten into (char, style) pairs
+    let mut chars: Vec<(char, Style)> = Vec::new();
+    for span in &spans {
+        let style = span.style;
+        for ch in span.content.chars() {
+            chars.push((ch, style));
+        }
+    }
+    // Walk chars: skip `skip` display columns, collect `width` columns
+    let mut col = 0usize;
+    let mut start_idx = 0usize;
+    // Skip phase
+    for (i, &(ch, _)) in chars.iter().enumerate() {
+        if col >= skip {
+            start_idx = i;
+            break;
+        }
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        col += cw;
+        start_idx = i + 1;
+    }
+    if start_idx >= chars.len() {
+        return Vec::new();
+    }
+    // Collect phase
+    let mut collected: Vec<(char, Style)> = Vec::new();
+    let mut acc = 0usize;
+    for &(ch, style) in &chars[start_idx..] {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if acc + cw > width {
+            break;
+        }
+        collected.push((ch, style));
+        acc += cw;
+    }
+    // Rebuild spans, merging consecutive chars with same style
+    let mut result: Vec<Span<'static>> = Vec::new();
+    if collected.is_empty() {
+        return result;
+    }
+    let mut current_style = collected[0].1;
+    let mut current_text = String::new();
+    for (ch, style) in collected {
+        if style == current_style {
+            current_text.push(ch);
+        } else {
+            if !current_text.is_empty() {
+                result.push(Span::styled(current_text, current_style));
+                current_text = String::new();
+            }
+            current_style = style;
+            current_text.push(ch);
+        }
+    }
+    if !current_text.is_empty() {
+        result.push(Span::styled(current_text, current_style));
+    }
+    result
+}
+
 /// Replace spaces at indent guide columns (multiples of 4) with `│` within leading whitespace.
 /// `guide_depth` is the number of indent levels to draw guides for.
 pub(crate) fn apply_indent_guides(

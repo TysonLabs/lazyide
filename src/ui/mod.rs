@@ -21,7 +21,7 @@ use crate::tab::{FoldRange, GitLineStatus};
 use crate::types::Focus;
 use crate::types::PendingAction;
 use crate::util::{relative_path, segment_has_selection};
-use helpers::apply_indent_guides;
+use helpers::{apply_indent_guides, clip_spans_by_columns};
 use overlays::*;
 
 fn slice_chars(s: &str, start: usize, end: usize) -> String {
@@ -271,7 +271,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     // to avoid expensive per-frame clones.
     let tab_idx = app.active_tab;
     let has_tab = tab_idx < app.tabs.len();
-    let (start_row, selection, cursor_row, cursor_col) = if has_tab {
+    let (start_row, selection, cursor_row, cursor_col, scroll_col) = if has_tab {
         let tab = &app.tabs[tab_idx];
         let sr = tab
             .editor_scroll_row
@@ -281,9 +281,10 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             tab.editor.selection_range(),
             tab.editor.cursor().0,
             tab.editor.cursor().1,
+            tab.editor_scroll_col,
         )
     } else {
-        (0, None, 0, 0)
+        (0, None, 0, 0, 0)
     };
     // Provide empty fallbacks for the no-tab case
     let empty_lines: Vec<String> = vec![String::new()];
@@ -480,8 +481,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             }
         }
         spans.push(Span::raw(" "));
-        let display_line = lines_ref[row].replace('\t', "    ");
-        let segment_text = slice_chars(&display_line, seg_start, seg_end);
+        let segment_text = slice_chars(&lines_ref[row], seg_start, seg_end).replace('\t', "    ");
         let bracket_colors = [theme.bracket_1, theme.bracket_2, theme.bracket_3];
         let bd = bracket_depths_ref.get(row).copied().unwrap_or(0);
         let hl = highlight_line(&segment_text, lang, &theme, bd, &bracket_colors);
@@ -490,6 +490,14 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             apply_indent_guides(hl.spans, guide_depth, guide_style)
         } else {
             hl.spans
+        };
+        let content_width = inner_w.saturating_sub(App::EDITOR_GUTTER_WIDTH as usize);
+        let content_spans = if !app.word_wrap && scroll_col > 0 {
+            clip_spans_by_columns(content_spans, scroll_col, content_width)
+        } else if !app.word_wrap {
+            clip_spans_by_columns(content_spans, 0, content_width)
+        } else {
+            content_spans
         };
         spans.extend(content_spans);
         // Pad line to full width so stale characters from previous frame are overwritten
@@ -560,7 +568,27 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             let logical_x = cursor_col
                 .clamp(seg_start, seg_end)
                 .saturating_sub(seg_start);
+            // When not wrapping, compute display-width offset for cursor and
+            // subtract the horizontal scroll so it renders at the right screen column.
+            let logical_x = if !app.word_wrap {
+                // Compute display-width of chars before cursor on this line
+                let line_chars: Vec<char> = lines_ref
+                    .get(cursor_row)
+                    .map(|l| l.replace('\t', "    ").chars().collect())
+                    .unwrap_or_default();
+                let mut dw = 0usize;
+                for i in 0..cursor_col.min(line_chars.len()) {
+                    dw += unicode_width::UnicodeWidthChar::width(line_chars[i]).unwrap_or(0);
+                }
+                dw.saturating_sub(scroll_col)
+            } else {
+                logical_x
+            };
             let cursor_x = logical_x.min(max_x);
+            // If cursor would be off-screen horizontally (scrolled past), skip rendering
+            if !app.word_wrap && cursor_x > max_x {
+                // cursor off-screen — don't render
+            } else
             if let Some(ghost) = app.completion.ghost.as_ref() {
                 if !ghost.is_empty()
                     && (cursor_x as u16 + App::EDITOR_GUTTER_WIDTH) < inner.width.saturating_sub(1)

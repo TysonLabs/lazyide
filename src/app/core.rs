@@ -396,6 +396,12 @@ impl App {
 
     pub(crate) fn toggle_word_wrap(&mut self) {
         self.word_wrap = !self.word_wrap;
+        if self.word_wrap {
+            // Reset horizontal scroll for all tabs when wrapping takes over
+            for tab in &mut self.tabs {
+                tab.editor_scroll_col = 0;
+            }
+        }
         self.wrap_width_cache = self.editor_wrap_width_chars();
         self.rebuild_all_visible_rows();
         self.sync_editor_scroll_guess();

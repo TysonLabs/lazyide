@@ -54,6 +54,7 @@ pub(crate) struct Tab {
     pub(crate) dirty: bool,
     pub(crate) open_disk_snapshot: Option<String>,
     pub(crate) editor_scroll_row: usize,
+    pub(crate) editor_scroll_col: usize,
     pub(crate) fold_ranges: Vec<FoldRange>,
     pub(crate) bracket_depths: Vec<u16>,
     pub(crate) folded_starts: HashSet<usize>,

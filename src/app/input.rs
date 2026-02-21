@@ -363,6 +363,26 @@ impl App {
                     self.clamp_cursor_to_viewport();
                     return Ok(());
                 }
+                MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+                    if !self.word_wrap {
+                        if let Some(tab) = self.active_tab_mut() {
+                            match mouse.kind {
+                                MouseEventKind::ScrollLeft => {
+                                    tab.editor_scroll_col = tab
+                                        .editor_scroll_col
+                                        .saturating_sub(Self::SCROLL_LINES);
+                                }
+                                MouseEventKind::ScrollRight => {
+                                    tab.editor_scroll_col = tab
+                                        .editor_scroll_col
+                                        .saturating_add(Self::SCROLL_LINES);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
                 _ => return Ok(()),
             }
             self.sync_editor_scroll_guess();

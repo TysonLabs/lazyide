@@ -285,6 +285,7 @@ impl App {
             dirty: false,
             open_disk_snapshot: Some(text),
             editor_scroll_row: 0,
+            editor_scroll_col: 0,
             fold_ranges,
             bracket_depths,
             folded_starts: HashSet::new(),
@@ -476,6 +477,48 @@ impl App {
         } else if cursor_visible >= tab.editor_scroll_row + inner_height {
             tab.editor_scroll_row = cursor_visible.saturating_sub(inner_height.saturating_sub(1));
         }
+        self.sync_editor_scroll_col();
+    }
+
+    pub(crate) fn sync_editor_scroll_col(&mut self) {
+        if self.word_wrap {
+            return;
+        }
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let (cursor_row, cursor_col) = tab.editor.cursor();
+        let content_width = self
+            .editor_rect
+            .width
+            .saturating_sub(2)
+            .saturating_sub(Self::EDITOR_GUTTER_WIDTH) as usize;
+        if content_width == 0 {
+            return;
+        }
+        // Compute cursor's display-width offset from start of line
+        let line = tab
+            .editor
+            .lines()
+            .get(cursor_row)
+            .map(|l| l.replace('\t', "    "))
+            .unwrap_or_default();
+        let chars: Vec<char> = line.chars().collect();
+        let mut cursor_display_col = 0usize;
+        for i in 0..cursor_col.min(chars.len()) {
+            cursor_display_col +=
+                unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(0);
+        }
+        let scroll_col = tab.editor_scroll_col;
+        if cursor_display_col < scroll_col {
+            if let Some(tab) = self.active_tab_mut() {
+                tab.editor_scroll_col = cursor_display_col;
+            }
+        } else if cursor_display_col >= scroll_col + content_width {
+            if let Some(tab) = self.active_tab_mut() {
+                tab.editor_scroll_col = cursor_display_col.saturating_sub(content_width.saturating_sub(1));
+            }
+        }
     }
 
     /// After a scroll event, ensure the cursor stays within the visible
@@ -647,12 +690,20 @@ impl App {
         let max_col = lines[row].chars().count();
         // text_x is in screen columns; map to char index within the segment
         // by walking chars and accumulating display width.
-        let chars: Vec<char> = lines[row].chars().collect();
+        let display_line = lines[row].replace('\t', "    ");
+        let chars: Vec<char> = display_line.chars().collect();
+        // When not wrapping, offset text_x by editor_scroll_col so clicks
+        // land on the correct character in the horizontally-scrolled view.
+        let effective_text_x = if !self.word_wrap {
+            text_x + tab.editor_scroll_col
+        } else {
+            text_x
+        };
         let mut col = seg_start;
         let mut width_acc = 0usize;
         for i in seg_start..seg_end.min(chars.len()) {
             let cw = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(0);
-            if width_acc + cw > text_x {
+            if width_acc + cw > effective_text_x {
                 break;
             }
             width_acc += cw;
