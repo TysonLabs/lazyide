@@ -17,7 +17,7 @@ use super::helpers::{centered_rect, help_keybind_line, list_item_style, themed_b
 pub(crate) fn render_menu(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(62, 62, frame.area());
-    app.context_menu.rect = area;
+    app.menu_rect = area;
     frame.render_widget(Clear, area);
     let mut items: Vec<ListItem> = Vec::new();
     items.push(ListItem::new(Line::from(vec![
@@ -54,7 +54,7 @@ pub(crate) fn render_menu(app: &mut App, frame: &mut Frame<'_>) {
 pub(crate) fn render_theme_browser(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(62, 70, frame.area());
-    app.context_menu.rect = area;
+    app.theme_browser_rect = area;
     frame.render_widget(Clear, area);
     let list_items: Vec<ListItem> = app
         .themes
@@ -78,7 +78,7 @@ pub(crate) fn render_theme_browser(app: &mut App, frame: &mut Frame<'_>) {
 pub(crate) fn render_file_picker(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(72, 65, frame.area());
-    app.context_menu.rect = area;
+    app.file_picker_rect = area;
     frame.render_widget(Clear, area);
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(vec![
@@ -116,7 +116,7 @@ pub(crate) fn render_file_picker(app: &mut App, frame: &mut Frame<'_>) {
 pub(crate) fn render_search_results(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(78, 72, frame.area());
-    app.context_menu.rect = area;
+    app.search_results_rect = area;
     frame.render_widget(Clear, area);
     let list_items: Vec<ListItem> = if app.search_results.results.is_empty() {
         vec![ListItem::new(Line::from("No results"))]

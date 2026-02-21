@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 use arboard::Clipboard;
@@ -9,10 +10,17 @@ use ratatui::layout::Rect;
 
 use crate::keybinds::{KeyAction, KeyBind, KeyBindings};
 use crate::lsp_client::{LspClient, LspCompletionItem};
-use crate::tab::{GitChangeSummary, GitFileStatus, ProjectSearchHit, Tab};
+use crate::tab::{GitChangeSummary, GitFileStatus, GitLineStatus, ProjectSearchHit, Tab};
 use crate::theme::Theme;
 use crate::tree_item::TreeItem;
 use crate::types::{CommandAction, Focus, PendingAction, PromptState};
+
+pub(crate) struct GitResult {
+    pub branch: Option<String>,
+    pub file_statuses: HashMap<PathBuf, GitFileStatus>,
+    pub change_summary: GitChangeSummary,
+    pub line_statuses: Vec<(PathBuf, Vec<GitLineStatus>)>,
+}
 
 mod core;
 mod editor;
@@ -87,7 +95,9 @@ pub(crate) struct App {
     pub(crate) menu_index: usize,
     pub(crate) menu_query: String,
     pub(crate) menu_results: Vec<CommandAction>,
+    pub(crate) menu_rect: Rect,
     pub(crate) theme_browser_open: bool,
+    pub(crate) theme_browser_rect: Rect,
     pub(crate) theme_index: usize,
     pub(crate) preview_revert_index: usize,
     pub(crate) themes: Vec<Theme>,
@@ -107,10 +117,12 @@ pub(crate) struct App {
     pub(crate) editor_dragging: bool,
     pub(crate) editor_drag_anchor: Option<(usize, usize)>,
     pub(crate) search_results: SearchResultsState,
+    pub(crate) search_results_rect: Rect,
     pub(crate) file_picker_open: bool,
     pub(crate) file_picker_query: String,
     pub(crate) file_picker_results: Vec<PathBuf>,
     pub(crate) file_picker_index: usize,
+    pub(crate) file_picker_rect: Rect,
     pub(crate) lsp: Option<LspClient>,
     pub(crate) completion: CompletionState,
     pub(crate) pending_completion_request: Option<i64>,
@@ -131,4 +143,16 @@ pub(crate) struct App {
     pub(crate) keybind_editor: KeybindEditorState,
     pub(crate) git_file_statuses: HashMap<PathBuf, GitFileStatus>,
     pub(crate) git_change_summary: GitChangeSummary,
+    pub(crate) git_result_rx: Option<Receiver<GitResult>>,
+    pub(crate) git_refresh_in_flight: bool,
+    pub(crate) git_thread_handle: Option<JoinHandle<()>>,
+    pub(crate) cached_file_list: Vec<PathBuf>,
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        if let Some(handle) = self.git_thread_handle.take() {
+            let _ = handle.join();
+        }
+    }
 }

@@ -3,9 +3,8 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use tui_textarea::Input;
 
 use crate::keybinds::KeyScope;
 use crate::types::{Focus, PendingAction};
@@ -122,19 +121,34 @@ impl App {
             return Ok(());
         }
 
-        if self.prompt.is_some() {
-            return Ok(());
-        }
-        if matches!(
-            self.pending,
-            PendingAction::ClosePrompt | PendingAction::Delete(_)
-        ) {
-            return Ok(());
-        }
-        if self
-            .active_tab()
-            .is_some_and(|t| t.recovery_prompt_open || t.conflict_prompt_open)
+        // Modal states: allow left-click to dismiss, block everything else
+        if self.prompt.is_some()
+            || matches!(
+                self.pending,
+                PendingAction::ClosePrompt | PendingAction::Delete(_)
+            )
+            || self
+                .active_tab()
+                .is_some_and(|t| t.recovery_prompt_open || t.conflict_prompt_open)
         {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                // Dismiss the modal on click outside (Esc-equivalent)
+                if self.prompt.is_some() {
+                    self.prompt = None;
+                } else if matches!(self.pending, PendingAction::Delete(_)) {
+                    self.pending = PendingAction::None;
+                    self.set_status("Delete cancelled");
+                } else if matches!(self.pending, PendingAction::ClosePrompt) {
+                    self.pending = PendingAction::None;
+                    self.set_status("Close cancelled");
+                } else if let Some(tab) = self.active_tab_mut() {
+                    if tab.recovery_prompt_open {
+                        tab.recovery_prompt_open = false;
+                    } else if tab.conflict_prompt_open {
+                        tab.conflict_prompt_open = false;
+                    }
+                }
+            }
             return Ok(());
         }
 
@@ -222,14 +236,11 @@ impl App {
                     self.open_tree_context_menu_at(mouse.column, mouse.row);
                 }
                 MouseEventKind::ScrollDown => {
-                    if self.selected + 1 < self.tree.len() {
-                        self.selected += 1;
-                    }
+                    self.selected = (self.selected + Self::SCROLL_LINES)
+                        .min(self.tree.len().saturating_sub(1));
                 }
                 MouseEventKind::ScrollUp => {
-                    if self.selected > 0 {
-                        self.selected -= 1;
-                    }
+                    self.selected = self.selected.saturating_sub(Self::SCROLL_LINES);
                 }
                 _ => {}
             }
@@ -238,29 +249,34 @@ impl App {
 
         // Tab bar click detection (title bar row of editor block)
         if mouse.row == self.editor_rect.y && inside(mouse.column, mouse.row, self.editor_rect) {
-            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                for (i, (name_rect, close_rect)) in self.tab_rects.iter().enumerate() {
-                    if inside(mouse.column, mouse.row, *close_rect) {
-                        // Click on [x] — close this tab
-                        if self.tabs[i].dirty {
-                            self.switch_to_tab(i);
-                            self.pending = PendingAction::ClosePrompt;
-                            self.set_status(
-                                "Unsaved changes: Enter save+close | Esc discard | C cancel",
-                            );
-                        } else {
-                            self.close_tab_at(i);
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    for (i, (name_rect, close_rect)) in self.tab_rects.iter().enumerate() {
+                        if inside(mouse.column, mouse.row, *close_rect) {
+                            // Click on [x] — close this tab
+                            if self.tabs[i].dirty {
+                                self.switch_to_tab(i);
+                                self.pending = PendingAction::ClosePrompt;
+                                self.set_status(
+                                    "Unsaved changes: Enter save+close | Esc discard | C cancel",
+                                );
+                            } else {
+                                self.close_tab_at(i);
+                            }
+                            return Ok(());
                         }
-                        return Ok(());
+                        if inside(mouse.column, mouse.row, *name_rect) {
+                            // Click on tab name — switch to it
+                            self.switch_to_tab(i);
+                            return Ok(());
+                        }
                     }
-                    if inside(mouse.column, mouse.row, *name_rect) {
-                        // Click on tab name — switch to it
-                        self.switch_to_tab(i);
-                        return Ok(());
-                    }
+                    return Ok(());
                 }
+                // Scroll events on the tab bar fall through to the editor scroll handler
+                MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {}
+                _ => return Ok(()),
             }
-            return Ok(());
         }
 
         if inside(mouse.column, mouse.row, self.editor_rect) {
@@ -314,26 +330,40 @@ impl App {
                     self.editor_context_menu_open = true;
                 }
                 MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
-                    let modified = self
-                        .active_tab_mut()
-                        .is_some_and(|t| t.editor.input(Input::from(Event::Mouse(mouse))));
-                    if modified {
-                        self.mark_dirty();
-                        self.notify_lsp_did_change();
+                    if self
+                        .active_tab()
+                        .is_some_and(|t| t.visible_rows_map.is_empty())
+                    {
+                        self.rebuild_visible_rows();
                     }
+                    let viewport_h = self.editor_rect.height.saturating_sub(2) as usize;
                     if let Some(tab) = self.active_tab_mut() {
+                        let max_scroll = tab
+                            .visible_rows_map
+                            .len()
+                            .saturating_sub(viewport_h.max(1));
                         match mouse.kind {
                             MouseEventKind::ScrollDown => {
-                                tab.editor_scroll_row = tab.editor_scroll_row.saturating_add(1)
+                                tab.editor_scroll_row = tab
+                                    .editor_scroll_row
+                                    .saturating_add(Self::SCROLL_LINES)
+                                    .min(max_scroll)
                             }
                             MouseEventKind::ScrollUp => {
-                                tab.editor_scroll_row = tab.editor_scroll_row.saturating_sub(1)
+                                tab.editor_scroll_row = tab
+                                    .editor_scroll_row
+                                    .saturating_sub(Self::SCROLL_LINES)
                             }
                             _ => {}
                         }
                     }
+                    // Move cursor to stay within the visible viewport so that
+                    // subsequent actions don't snap the scroll back to the old
+                    // cursor position.
+                    self.clamp_cursor_to_viewport();
+                    return Ok(());
                 }
-                _ => {}
+                _ => return Ok(()),
             }
             self.sync_editor_scroll_guess();
             self.refresh_inline_ghost();

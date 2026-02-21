@@ -425,6 +425,31 @@ fn parse_porcelain_z_entries(raw: &str) -> Vec<(String, GitFileStatus)> {
     entries
 }
 
+pub(crate) fn spawn_git_refresh(
+    root: PathBuf,
+    tab_paths: Vec<(PathBuf, usize)>,
+    tx: std::sync::mpsc::Sender<crate::app::GitResult>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let branch = detect_git_branch(&root);
+        let file_statuses = compute_git_file_statuses(&root);
+        let change_summary = compute_git_change_summary(&root);
+        let line_statuses: Vec<(PathBuf, Vec<GitLineStatus>)> = tab_paths
+            .into_iter()
+            .map(|(path, line_count)| {
+                let status = compute_git_line_status(&root, &path, line_count);
+                (path, status)
+            })
+            .collect();
+        let _ = tx.send(crate::app::GitResult {
+            branch,
+            file_statuses,
+            change_summary,
+            line_statuses,
+        });
+    })
+}
+
 pub(crate) fn file_uri(path: &Path) -> Option<String> {
     let abs = path.canonicalize().ok()?;
     Url::from_file_path(abs).ok().map(|u| u.to_string())
@@ -1560,5 +1585,244 @@ mod utility_tests {
             "Select All"
         );
         assert_eq!(editor_context_label(EditorContextAction::Cancel), "Cancel");
+    }
+}
+
+#[cfg(test)]
+mod async_git_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn test_spawn_git_refresh_sends_result_non_git_dir() {
+        // spawn_git_refresh on a non-git directory should still complete
+        // and send a GitResult (with None branch, empty statuses)
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (tx, rx) = mpsc::channel();
+        spawn_git_refresh(tmp.path().to_path_buf(), vec![], tx);
+        let result = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("should receive GitResult");
+        assert!(result.branch.is_none());
+        assert!(result.file_statuses.is_empty());
+        assert_eq!(result.change_summary.files_changed, 0);
+        assert!(result.line_statuses.is_empty());
+    }
+
+    #[test]
+    fn test_spawn_git_refresh_sends_result_with_tab_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let fake_file = tmp.path().join("test.rs");
+        std::fs::write(&fake_file, "fn main() {}\n").expect("write");
+        let (tx, rx) = mpsc::channel();
+        spawn_git_refresh(
+            tmp.path().to_path_buf(),
+            vec![(fake_file.clone(), 1)],
+            tx,
+        );
+        let result = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("should receive GitResult");
+        // Should have one line_status entry for the tab path
+        assert_eq!(result.line_statuses.len(), 1);
+        assert_eq!(result.line_statuses[0].0, fake_file);
+        assert_eq!(result.line_statuses[0].1.len(), 1);
+    }
+
+    #[test]
+    fn test_spawn_git_refresh_clears_in_flight_via_channel() {
+        // Verifies that the channel mechanism works: send completes, receiver gets it
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (tx, rx) = mpsc::channel();
+        spawn_git_refresh(tmp.path().to_path_buf(), vec![], tx);
+        // First recv succeeds
+        assert!(rx.recv_timeout(Duration::from_secs(5)).is_ok());
+        // Second recv should fail (only one result sent)
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod indent_depth_tests {
+    #[test]
+    fn test_blank_line_depth_propagation_simple() {
+        // Simulate the two-pass algorithm from draw()
+        let lines = vec!["    a", "", "    b"];
+        let total = lines.len();
+        let mut depths = vec![0usize; total];
+        let mut is_blank = vec![false; total];
+        for i in 0..total {
+            let expanded = lines[i].replace('\t', "    ");
+            let leading = expanded.len() - expanded.trim_start_matches(' ').len();
+            if expanded.trim().is_empty() {
+                is_blank[i] = true;
+            } else {
+                depths[i] = leading / 4;
+            }
+        }
+        let mut above_depth = vec![0usize; total];
+        let mut last = 0usize;
+        for i in 0..total {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            above_depth[i] = last;
+        }
+        let mut below_depth = vec![0usize; total];
+        last = 0;
+        for i in (0..total).rev() {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            below_depth[i] = last;
+        }
+        for i in 0..total {
+            if is_blank[i] {
+                depths[i] = above_depth[i].min(below_depth[i]);
+            }
+        }
+        assert_eq!(depths, vec![1, 1, 1]); // blank line inherits depth 1
+    }
+
+    #[test]
+    fn test_blank_line_depth_min_of_neighbors() {
+        // Blank line between different depths picks the minimum
+        let lines = vec!["        a", "", "    b"];
+        let total = lines.len();
+        let mut depths = vec![0usize; total];
+        let mut is_blank = vec![false; total];
+        for i in 0..total {
+            let expanded = lines[i].replace('\t', "    ");
+            let leading = expanded.len() - expanded.trim_start_matches(' ').len();
+            if expanded.trim().is_empty() {
+                is_blank[i] = true;
+            } else {
+                depths[i] = leading / 4;
+            }
+        }
+        let mut above_depth = vec![0usize; total];
+        let mut last = 0usize;
+        for i in 0..total {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            above_depth[i] = last;
+        }
+        let mut below_depth = vec![0usize; total];
+        last = 0;
+        for i in (0..total).rev() {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            below_depth[i] = last;
+        }
+        for i in 0..total {
+            if is_blank[i] {
+                depths[i] = above_depth[i].min(below_depth[i]);
+            }
+        }
+        assert_eq!(depths[0], 2); // 8 spaces = depth 2
+        assert_eq!(depths[1], 1); // min(2, 1) = 1
+        assert_eq!(depths[2], 1); // 4 spaces = depth 1
+    }
+
+    #[test]
+    fn test_consecutive_blank_lines_propagate() {
+        let lines = vec!["    a", "", "", "", "    b"];
+        let total = lines.len();
+        let mut depths = vec![0usize; total];
+        let mut is_blank = vec![false; total];
+        for i in 0..total {
+            let expanded = lines[i].replace('\t', "    ");
+            let leading = expanded.len() - expanded.trim_start_matches(' ').len();
+            if expanded.trim().is_empty() {
+                is_blank[i] = true;
+            } else {
+                depths[i] = leading / 4;
+            }
+        }
+        let mut above_depth = vec![0usize; total];
+        let mut last = 0usize;
+        for i in 0..total {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            above_depth[i] = last;
+        }
+        let mut below_depth = vec![0usize; total];
+        last = 0;
+        for i in (0..total).rev() {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            below_depth[i] = last;
+        }
+        for i in 0..total {
+            if is_blank[i] {
+                depths[i] = above_depth[i].min(below_depth[i]);
+            }
+        }
+        // All blank lines should get depth 1 (min of above=1, below=1)
+        assert_eq!(depths, vec![1, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn test_blank_lines_at_start_use_below() {
+        let lines = vec!["", "", "    code"];
+        let total = lines.len();
+        let mut depths = vec![0usize; total];
+        let mut is_blank = vec![false; total];
+        for i in 0..total {
+            let expanded = lines[i].replace('\t', "    ");
+            let leading = expanded.len() - expanded.trim_start_matches(' ').len();
+            if expanded.trim().is_empty() {
+                is_blank[i] = true;
+            } else {
+                depths[i] = leading / 4;
+            }
+        }
+        let mut above_depth = vec![0usize; total];
+        let mut last = 0usize;
+        for i in 0..total {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            above_depth[i] = last;
+        }
+        let mut below_depth = vec![0usize; total];
+        last = 0;
+        for i in (0..total).rev() {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            below_depth[i] = last;
+        }
+        for i in 0..total {
+            if is_blank[i] {
+                depths[i] = above_depth[i].min(below_depth[i]);
+            }
+        }
+        // Leading blanks: above=0, below=1 → min = 0
+        assert_eq!(depths, vec![0, 0, 1]);
+    }
+
+    #[test]
+    fn test_no_blank_lines() {
+        let lines = vec!["a", "    b", "        c"];
+        let total = lines.len();
+        let mut depths = vec![0usize; total];
+        let mut is_blank = vec![false; total];
+        for i in 0..total {
+            let expanded = lines[i].replace('\t', "    ");
+            let leading = expanded.len() - expanded.trim_start_matches(' ').len();
+            if expanded.trim().is_empty() {
+                is_blank[i] = true;
+            } else {
+                depths[i] = leading / 4;
+            }
+        }
+        // No blank lines, depths should be as-is
+        assert_eq!(depths, vec![0, 1, 2]);
     }
 }

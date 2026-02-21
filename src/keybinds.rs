@@ -377,35 +377,27 @@ impl KeyBind {
     fn format_bind(&self, uppercase: bool) -> String {
         let mut parts = Vec::new();
         if self.modifiers.contains(KeyModifiers::CONTROL) {
-            let label = if cfg!(target_os = "macos") {
-                if uppercase { "⌃" } else { "⌃" }
-            } else {
-                if uppercase { "Ctrl" } else { "ctrl" }
-            };
-            parts.push(label.to_string());
+            parts.push(if uppercase { "Ctrl" } else { "ctrl" }.to_string());
         }
         if self.modifiers.contains(KeyModifiers::SHIFT) {
-            let label = if cfg!(target_os = "macos") {
-                if uppercase { "⇧" } else { "⇧" }
-            } else {
-                if uppercase { "Shift" } else { "shift" }
-            };
-            parts.push(label.to_string());
+            parts.push(if uppercase { "Shift" } else { "shift" }.to_string());
         }
         if self.modifiers.contains(KeyModifiers::ALT) {
-            let label = if cfg!(target_os = "macos") {
-                if uppercase { "⌥" } else { "⌥" }
-            } else {
-                if uppercase { "Alt" } else { "alt" }
-            };
-            parts.push(label.to_string());
+            parts.push(if uppercase { "Alt" } else { "alt" }.to_string());
         }
         parts.push(self.format_key_name(uppercase));
         parts.join("+")
     }
 
     pub(crate) fn display(&self) -> String {
-        self.format_bind(true)
+        if cfg!(target_os = "macos") {
+            self.format_bind(true)
+                .replace("Alt+", "⌥+")
+                .replace("Ctrl+", "⌃+")
+                .replace("Shift+", "⇧+")
+        } else {
+            self.format_bind(true)
+        }
     }
 
     pub(crate) fn matches(&self, key: &KeyEvent) -> bool {
@@ -873,13 +865,21 @@ mod keybind_tests {
     #[test]
     fn test_keybind_display() {
         let kb = KeyBind::parse("ctrl+shift+f").unwrap();
-        assert_eq!(kb.display(), "Ctrl+Shift+F");
+        if cfg!(target_os = "macos") {
+            assert_eq!(kb.display(), "⌃+⇧+F");
+        } else {
+            assert_eq!(kb.display(), "Ctrl+Shift+F");
+        }
     }
 
     #[test]
     fn test_keybind_display_simple() {
         let kb = KeyBind::parse("ctrl+s").unwrap();
-        assert_eq!(kb.display(), "Ctrl+S");
+        if cfg!(target_os = "macos") {
+            assert_eq!(kb.display(), "⌃+S");
+        } else {
+            assert_eq!(kb.display(), "Ctrl+S");
+        }
     }
 
     #[test]
@@ -966,7 +966,11 @@ mod keybind_tests {
     #[test]
     fn test_display_for_action() {
         let kb = KeyBindings::defaults();
-        assert_eq!(kb.display_for(KeyAction::Save), "Ctrl+S");
+        if cfg!(target_os = "macos") {
+            assert_eq!(kb.display_for(KeyAction::Save), "⌃+S");
+        } else {
+            assert_eq!(kb.display_for(KeyAction::Save), "Ctrl+S");
+        }
         assert_eq!(kb.display_for(KeyAction::Help), "F4");
     }
 

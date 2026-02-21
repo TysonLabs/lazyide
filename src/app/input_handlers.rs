@@ -910,12 +910,12 @@ impl App {
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return Ok(());
         }
-        if Self::left_click_outside(mouse, self.context_menu.rect) {
+        if Self::left_click_outside(mouse, self.menu_rect) {
             self.menu_open = false;
             self.menu_query.clear();
             return Ok(());
         }
-        let row = mouse.row.saturating_sub(self.context_menu.rect.y + 2) as usize;
+        let row = mouse.row.saturating_sub(self.menu_rect.y + 2) as usize;
         if row < self.menu_results.len() {
             self.menu_index = row;
             let action = self.menu_results[self.menu_index];
@@ -927,7 +927,7 @@ impl App {
     }
 
     pub(crate) fn handle_theme_browser_mouse(&mut self, mouse: MouseEvent) -> io::Result<()> {
-        if Self::left_click_outside(mouse, self.context_menu.rect) {
+        if Self::left_click_outside(mouse, self.theme_browser_rect) {
             self.active_theme_index = self.preview_revert_index;
             self.theme_index = self.preview_revert_index;
             self.theme_browser_open = false;
@@ -949,7 +949,7 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                let row = mouse.row.saturating_sub(self.context_menu.rect.y + 1) as usize;
+                let row = mouse.row.saturating_sub(self.theme_browser_rect.y + 1) as usize;
                 if row < self.themes.len() {
                     self.theme_index = row;
                     self.active_theme_index = row;
@@ -1039,11 +1039,11 @@ impl App {
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return Ok(());
         }
-        if !inside(mouse.column, mouse.row, self.context_menu.rect) {
+        if !inside(mouse.column, mouse.row, self.search_results_rect) {
             self.search_results.open = false;
             return Ok(());
         }
-        let row = mouse.row.saturating_sub(self.context_menu.rect.y + 1) as usize;
+        let row = mouse.row.saturating_sub(self.search_results_rect.y + 1) as usize;
         if row < self.search_results.results.len() {
             self.search_results.index = row;
             self.open_selected_search_result()?;

@@ -97,6 +97,7 @@ pub fn run() -> io::Result<()> {
 fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io::Result<()> {
     loop {
         app.poll_lsp();
+        app.poll_git_results();
         if let Err(err) = app.poll_fs_changes() {
             app.set_status(format!("Filesystem update error: {err}"));
         }
@@ -109,18 +110,30 @@ fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io
             return Ok(());
         }
         if event::poll(Duration::from_millis(100))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if let Err(err) = app.handle_key(key) {
-                        app.set_status(format!("Action failed: {err}"));
+            // Drain all pending events before the next draw to avoid
+            // queuing hundreds of redraws during rapid mouse scrolling.
+            loop {
+                let ev = event::read()?;
+                match ev {
+                    Event::Key(key) => {
+                        if let Err(err) = app.handle_key(key) {
+                            app.set_status(format!("Action failed: {err}"));
+                        }
                     }
-                }
-                Event::Mouse(mouse) => {
-                    if let Err(err) = app.handle_mouse(mouse) {
-                        app.set_status(format!("Action failed: {err}"));
+                    Event::Mouse(mouse) => {
+                        if let Err(err) = app.handle_mouse(mouse) {
+                            app.set_status(format!("Action failed: {err}"));
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
+                if app.quit {
+                    return Ok(());
+                }
+                // If no more events are pending, break and redraw.
+                if !event::poll(Duration::ZERO)? {
+                    break;
+                }
             }
         }
     }
