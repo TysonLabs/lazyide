@@ -20,6 +20,7 @@ Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](ht
 - **Indent guides**: vertical guide lines at 4-space tab stops in indented code, with blank-line continuity
 - **Git branch & change summary**: branch name + change counts (`Δ: ~M +A ?U`) shown in the top bar
 - **Word wrap**: wrapped-line cursor/selection/mouse support, toggle with `Alt+Z` (or `F6`)
+- **Horizontal scrolling**: when word wrap is off, Shift+scroll pans long lines; cursor movement auto-scrolls to keep cursor visible
 - **Autosave & recovery**: dirty buffers saved every 2s, crash recovery on reopen
 - **POSIX trailing newline**: files always saved with a final newline
 
@@ -140,6 +141,7 @@ This detects missing tools (rust-analyzer, ripgrep) and offers to install them a
 - Left-click + drag in editor selects text
 - Right-click in editor for edit menu (Copy, Cut, Paste, Select All)
 - Click fold gutter icons to toggle folds
+- Shift+scroll horizontally when word wrap is off
 
 ### Custom Keybindings
 
