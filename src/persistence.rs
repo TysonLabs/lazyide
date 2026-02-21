@@ -13,6 +13,8 @@ pub(crate) struct PersistedState {
     pub(crate) theme_name: String,
     #[serde(default)]
     pub(crate) files_pane_width: Option<u16>,
+    #[serde(default)]
+    pub(crate) word_wrap: Option<bool>,
 }
 
 pub(crate) fn autosave_path_for(path: &Path) -> PathBuf {

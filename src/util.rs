@@ -64,6 +64,7 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::ReplaceInFile => "Find and Replace",
         CommandAction::GoToLine => "Go to Line",
         CommandAction::Keybinds => "Keybind Editor",
+        CommandAction::ToggleWordWrap => "Toggle Word Wrap",
     }
 }
 
@@ -596,6 +597,7 @@ pub(crate) fn compute_fold_ranges(
     ranges.dedup_by(|a, b| a.start_line == b.start_line && a.end_line == b.end_line);
     (ranges, bracket_depths)
 }
+#[cfg(test)]
 pub(crate) fn row_has_selection(
     row: usize,
     line_len_chars: usize,
@@ -620,6 +622,63 @@ pub(crate) fn row_has_selection(
         return ec > 0;
     }
     true
+}
+
+pub(crate) fn wrap_segments_for_line(line: &str, wrap_width: usize) -> Vec<(usize, usize)> {
+    let len = line.chars().count();
+    if len == 0 {
+        return vec![(0, 0)];
+    }
+    if wrap_width == 0 || wrap_width == usize::MAX || len <= wrap_width {
+        return vec![(0, len)];
+    }
+
+    let chars: Vec<char> = line.chars().collect();
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    while start < len {
+        let hard_end = (start + wrap_width).min(len);
+        let mut end = hard_end;
+        if hard_end < len {
+            for i in ((start + 1)..hard_end).rev() {
+                if chars[i].is_whitespace() {
+                    end = i + 1;
+                    break;
+                }
+            }
+        }
+        if end <= start {
+            end = hard_end.max(start + 1).min(len);
+        }
+        segments.push((start, end));
+        start = end;
+    }
+    segments
+}
+
+pub(crate) fn segment_has_selection(
+    row: usize,
+    seg_start_col: usize,
+    seg_end_col: usize,
+    selection: Option<((usize, usize), (usize, usize))>,
+) -> bool {
+    let Some(((mut sr, mut sc), (mut er, mut ec))) = selection else {
+        return false;
+    };
+    if (sr, sc) > (er, ec) {
+        std::mem::swap(&mut sr, &mut er);
+        std::mem::swap(&mut sc, &mut ec);
+    }
+    if sr == er && sc == ec {
+        return false;
+    }
+    if row < sr || row > er {
+        return false;
+    }
+
+    let sel_start = if row == sr { sc } else { 0 };
+    let sel_end = if row == er { ec } else { usize::MAX };
+    sel_start < seg_end_col && sel_end > seg_start_col
 }
 
 pub(crate) fn inside(x: u16, y: u16, rect: Rect) -> bool {
@@ -1116,6 +1175,34 @@ mod fold_and_selection_tests {
         assert!(!row_has_selection(1, 50, sel));
         assert!(!row_has_selection(8, 50, sel));
     }
+
+    #[test]
+    fn test_wrap_segments_for_line_breaks_long_text() {
+        let segs = wrap_segments_for_line("alpha beta gamma", 6);
+        assert_eq!(segs, vec![(0, 6), (6, 11), (11, 16)]);
+    }
+
+    #[test]
+    fn test_wrap_segments_for_line_handles_empty() {
+        let segs = wrap_segments_for_line("", 8);
+        assert_eq!(segs, vec![(0, 0)]);
+    }
+
+    #[test]
+    fn test_segment_has_selection_single_segment() {
+        assert!(segment_has_selection(2, 0, 5, Some(((2, 3), (2, 9)))));
+        assert!(!segment_has_selection(2, 0, 3, Some(((2, 3), (2, 9)))));
+    }
+
+    #[test]
+    fn test_segment_has_selection_multiline() {
+        let sel = Some(((1, 4), (3, 2)));
+        assert!(segment_has_selection(1, 3, 6, sel));
+        assert!(segment_has_selection(2, 0, 10, sel));
+        assert!(segment_has_selection(3, 0, 3, sel));
+        assert!(!segment_has_selection(3, 3, 8, sel));
+    }
+
     #[test]
     fn test_visible_rows_map_excludes_folded_lines() {
         // Simulate a 7-line file with lines 1-2 folded (fold starting at line 0)

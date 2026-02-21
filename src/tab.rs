@@ -58,6 +58,8 @@ pub(crate) struct Tab {
     pub(crate) bracket_depths: Vec<u16>,
     pub(crate) folded_starts: HashSet<usize>,
     pub(crate) visible_rows_map: Vec<usize>,
+    pub(crate) visible_row_starts: Vec<usize>,
+    pub(crate) visible_row_ends: Vec<usize>,
     pub(crate) open_doc_uri: Option<String>,
     pub(crate) open_doc_version: i32,
     pub(crate) diagnostics: Vec<LspDiagnostic>,

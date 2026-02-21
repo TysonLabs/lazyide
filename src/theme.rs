@@ -256,11 +256,13 @@ mod theme_and_persistence_tests {
         let state = PersistedState {
             theme_name: "Dracula".to_string(),
             files_pane_width: Some(30),
+            word_wrap: Some(true),
         };
         let json = serde_json::to_string(&state).unwrap();
         let de: PersistedState = serde_json::from_str(&json).unwrap();
         assert_eq!(de.theme_name, "Dracula");
         assert_eq!(de.files_pane_width, Some(30));
+        assert_eq!(de.word_wrap, Some(true));
     }
 
     #[test]
@@ -268,11 +270,13 @@ mod theme_and_persistence_tests {
         let state = PersistedState {
             theme_name: "Nord".to_string(),
             files_pane_width: None,
+            word_wrap: None,
         };
         let json = serde_json::to_string(&state).unwrap();
         let de: PersistedState = serde_json::from_str(&json).unwrap();
         assert_eq!(de.theme_name, "Nord");
         assert_eq!(de.files_pane_width, None);
+        assert_eq!(de.word_wrap, None);
     }
 
     #[test]
@@ -280,6 +284,7 @@ mod theme_and_persistence_tests {
         let de: PersistedState = serde_json::from_str(r##"{"theme_name":"Monokai Pro"}"##).unwrap();
         assert_eq!(de.theme_name, "Monokai Pro");
         assert_eq!(de.files_pane_width, None);
+        assert_eq!(de.word_wrap, None);
     }
 
     #[test]

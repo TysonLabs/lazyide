@@ -359,6 +359,22 @@ impl App {
         }
 
         // Editor keybind lookup
+        if self.word_wrap && key.modifiers == KeyModifiers::NONE {
+            match key.code {
+                KeyCode::Down => {
+                    self.move_cursor_visual(true);
+                    self.refresh_inline_ghost();
+                    return Ok(());
+                }
+                KeyCode::Up => {
+                    self.move_cursor_visual(false);
+                    self.refresh_inline_ghost();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         if let Some(action) = self.keybinds.lookup(&key, KeyScope::Editor) {
             return self.run_key_action(action);
         }
@@ -455,6 +471,7 @@ impl App {
                     self.switch_to_tab(next);
                 }
             }
+            KeyAction::ToggleWordWrap => self.toggle_word_wrap(),
             // Editor
             KeyAction::GoToDefinition => {
                 if self.focus == Focus::Editor {

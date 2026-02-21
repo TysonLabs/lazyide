@@ -263,14 +263,20 @@ impl App {
         let lang = syntax_lang_for_path(Some(path.as_path()));
         let (fold_ranges, bracket_depths) = compute_fold_ranges(ta.lines(), lang);
         let mut visible_rows_map = Vec::new();
+        let mut visible_row_starts = Vec::new();
+        let mut visible_row_ends = Vec::new();
         for row in 0..ta.lines().len() {
             visible_rows_map.push(row);
+            visible_row_starts.push(0);
+            visible_row_ends.push(ta.lines()[row].chars().count());
         }
         if visible_rows_map.is_empty() {
             visible_rows_map.push(0);
+            visible_row_starts.push(0);
+            visible_row_ends.push(0);
         }
 
-        let git_line_status = compute_git_line_status(&self.root, &path, visible_rows_map.len());
+        let git_line_status = compute_git_line_status(&self.root, &path, ta.lines().len());
 
         let tab = Tab {
             path: path.clone(),
@@ -283,6 +289,8 @@ impl App {
             bracket_depths,
             folded_starts: HashSet::new(),
             visible_rows_map,
+            visible_row_starts,
+            visible_row_ends,
             open_doc_uri: None,
             open_doc_version: 0,
             diagnostics: Vec::new(),
@@ -445,7 +453,7 @@ impl App {
         let Some(tab) = self.active_tab() else {
             return;
         };
-        let (cursor_row, _) = tab.editor.cursor();
+        let (cursor_row, cursor_col) = tab.editor.cursor();
         let inner_height = self.editor_rect.height.saturating_sub(2) as usize;
         if inner_height == 0 {
             if let Some(tab) = self.active_tab_mut() {
@@ -459,7 +467,7 @@ impl App {
         {
             self.rebuild_visible_rows();
         }
-        let cursor_visible = self.visible_index_of_source_row(cursor_row);
+        let cursor_visible = self.visible_index_of_source_position(cursor_row, cursor_col);
         let Some(tab) = self.active_tab_mut() else {
             return;
         };
@@ -528,21 +536,73 @@ impl App {
         if visible_rows.is_empty() {
             return;
         }
-        let cursor_vis = self.visible_index_of_source_row(cursor_row);
+        let cursor_vis = self.visible_index_of_source_position(cursor_row, cursor_col);
         let target_vis = if down {
             (cursor_vis + inner_height).min(visible_rows.len().saturating_sub(1))
         } else {
             cursor_vis.saturating_sub(inner_height)
         };
         let target_row = visible_rows[target_vis];
+        let target_start_col = tab.visible_row_starts.get(target_vis).copied().unwrap_or(0);
+        let target_end_col = tab
+            .visible_row_ends
+            .get(target_vis)
+            .copied()
+            .unwrap_or(target_start_col);
         let target_lines = self.active_tab().map_or(0, |t| {
-            t.editor.lines().get(target_row).map_or(0, |l| l.len())
+            t.editor
+                .lines()
+                .get(target_row)
+                .map_or(0, |l| l.chars().count())
         });
-        let col = cursor_col.min(target_lines);
+        let col = cursor_col
+            .min(target_end_col)
+            .max(target_start_col)
+            .min(target_lines);
         if let Some(tab) = self.active_tab_mut() {
             tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
                 to_u16_saturating(target_row),
                 to_u16_saturating(col),
+            ));
+        }
+        self.sync_editor_scroll_guess();
+    }
+
+    pub(crate) fn move_cursor_visual(&mut self, down: bool) {
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        if tab.visible_rows_map.is_empty() {
+            return;
+        }
+        let (cursor_row, cursor_col) = tab.editor.cursor();
+        let cursor_vis = self.visible_index_of_source_position(cursor_row, cursor_col);
+        let target_vis = if down {
+            (cursor_vis + 1).min(tab.visible_rows_map.len().saturating_sub(1))
+        } else {
+            cursor_vis.saturating_sub(1)
+        };
+        let target_row = tab
+            .visible_rows_map
+            .get(target_vis)
+            .copied()
+            .unwrap_or(cursor_row);
+        let target_start = tab.visible_row_starts.get(target_vis).copied().unwrap_or(0);
+        let target_end = tab
+            .visible_row_ends
+            .get(target_vis)
+            .copied()
+            .unwrap_or(target_start);
+        let line_len = tab
+            .editor
+            .lines()
+            .get(target_row)
+            .map_or(0, |l| l.chars().count());
+        let target_col = cursor_col.max(target_start).min(target_end).min(line_len);
+        if let Some(tab) = self.active_tab_mut() {
+            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                to_u16_saturating(target_row),
+                to_u16_saturating(target_col),
             ));
         }
         self.sync_editor_scroll_guess();
@@ -573,9 +633,19 @@ impl App {
             .get(visible_idx)
             .copied()
             .unwrap_or_else(|| *tab.visible_rows_map.last().unwrap_or(&0));
+        let seg_start = tab
+            .visible_row_starts
+            .get(visible_idx)
+            .copied()
+            .unwrap_or(0);
+        let seg_end = tab
+            .visible_row_ends
+            .get(visible_idx)
+            .copied()
+            .unwrap_or(seg_start);
         let text_x = inner_x.saturating_sub(Self::EDITOR_GUTTER_WIDTH as usize);
         let max_col = lines[row].chars().count();
-        let col = text_x.min(max_col);
+        let col = seg_start.saturating_add(text_x).min(seg_end).min(max_col);
         Some((row, col))
     }
     pub(crate) fn extend_mouse_selection(&mut self, x: u16, y: u16) {

@@ -22,7 +22,8 @@ use crate::theme::{Theme, load_themes};
 use crate::types::{CommandAction, Focus, PendingAction, PromptMode, PromptState};
 use crate::util::{
     command_action_label, compute_fold_ranges, compute_git_change_summary,
-    compute_git_file_statuses, detect_git_branch, relative_path, spawn_git_refresh, text_to_lines,
+    compute_git_file_statuses, detect_git_branch, relative_path, spawn_git_refresh,
+    text_to_lines, wrap_segments_for_line,
 };
 
 impl App {
@@ -117,6 +118,8 @@ impl App {
             replace_after_find: false,
             git_branch: None,
             enhanced_keys: false,
+            word_wrap: false,
+            wrap_width_cache: usize::MAX,
             keybinds: load_keybindings(),
             keybind_editor: KeybindEditorState {
                 open: false,
@@ -358,6 +361,9 @@ impl App {
         let Some(saved) = load_persisted_state() else {
             return;
         };
+        if let Some(word_wrap) = saved.word_wrap {
+            self.word_wrap = word_wrap;
+        }
         if let Some(width) = saved.files_pane_width {
             self.files_pane_width = width.max(Self::MIN_FILES_PANE_WIDTH);
         }
@@ -376,6 +382,7 @@ impl App {
         let state = PersistedState {
             theme_name: self.active_theme().name.clone(),
             files_pane_width: Some(self.files_pane_width),
+            word_wrap: Some(self.word_wrap),
         };
         if save_persisted_state(&state).is_err() {
             self.set_status("Failed to persist app state");
@@ -384,6 +391,24 @@ impl App {
 
     pub(crate) fn persist_theme_selection(&mut self) {
         self.persist_state();
+    }
+
+    pub(crate) fn toggle_word_wrap(&mut self) {
+        self.word_wrap = !self.word_wrap;
+        self.wrap_width_cache = self.editor_wrap_width_chars();
+        let previous_active = self.active_tab;
+        for i in 0..self.tabs.len() {
+            self.active_tab = i;
+            self.rebuild_visible_rows();
+        }
+        self.active_tab = previous_active.min(self.tabs.len().saturating_sub(1));
+        self.sync_editor_scroll_guess();
+        self.persist_state();
+        if self.word_wrap {
+            self.set_status("Word wrap enabled");
+        } else {
+            self.set_status("Word wrap disabled");
+        }
     }
 
     pub(crate) fn on_editor_content_changed(&mut self) {
@@ -442,6 +467,7 @@ impl App {
             CommandAction::ReplaceInFile,
             CommandAction::GoToLine,
             CommandAction::Keybinds,
+            CommandAction::ToggleWordWrap,
         ];
         let q = self.menu_query.to_ascii_lowercase();
         self.menu_results = all
@@ -510,6 +536,7 @@ impl App {
                 self.keybind_editor.conflict = None;
                 self.refresh_keybind_editor_actions();
             }
+            CommandAction::ToggleWordWrap => self.toggle_word_wrap(),
         }
         Ok(())
     }
@@ -616,8 +643,10 @@ impl App {
         let Some(tab) = self.active_tab() else {
             return;
         };
-        let lines = tab.editor.lines();
+        let lines = tab.editor.lines().to_vec();
         let num_lines = lines.len();
+        let wrap_width = self.editor_wrap_width_chars();
+        let word_wrap = self.word_wrap;
         // Precompute hidden rows via HashSet for O(1) lookup per row
         let mut hidden: HashSet<usize> = HashSet::new();
         let tab = &self.tabs[self.active_tab];
@@ -630,18 +659,45 @@ impl App {
         }
         let tab = &mut self.tabs[self.active_tab];
         tab.visible_rows_map.clear();
+        tab.visible_row_starts.clear();
+        tab.visible_row_ends.clear();
         tab.visible_rows_map
+            .reserve(num_lines.saturating_sub(hidden.len()));
+        tab.visible_row_starts
+            .reserve(num_lines.saturating_sub(hidden.len()));
+        tab.visible_row_ends
             .reserve(num_lines.saturating_sub(hidden.len()));
         for row in 0..num_lines {
             if !hidden.contains(&row) {
-                tab.visible_rows_map.push(row);
+                let segments = if word_wrap {
+                    wrap_segments_for_line(&lines[row], wrap_width)
+                } else {
+                    vec![(0, lines[row].chars().count())]
+                };
+                for (start, end) in segments {
+                    tab.visible_rows_map.push(row);
+                    tab.visible_row_starts.push(start);
+                    tab.visible_row_ends.push(end);
+                }
             }
         }
         if tab.visible_rows_map.is_empty() {
             tab.visible_rows_map.push(0);
+            tab.visible_row_starts.push(0);
+            tab.visible_row_ends.push(0);
         }
         let max_scroll = tab.visible_rows_map.len().saturating_sub(1);
         tab.editor_scroll_row = tab.editor_scroll_row.min(max_scroll);
+    }
+
+    fn editor_wrap_width_chars(&self) -> usize {
+        let inner_width = self.editor_rect.width.saturating_sub(2);
+        let content_width = inner_width.saturating_sub(Self::EDITOR_GUTTER_WIDTH);
+        if content_width == 0 {
+            usize::MAX
+        } else {
+            content_width as usize
+        }
     }
 
     pub(crate) fn visible_index_of_source_row(&self, row: usize) -> usize {
@@ -657,6 +713,28 @@ impl App {
                     .position(|r| *r > row)
                     .unwrap_or(tab.visible_rows_map.len().saturating_sub(1))
             })
+    }
+
+    pub(crate) fn visible_index_of_source_position(&self, row: usize, col: usize) -> usize {
+        let Some(tab) = self.active_tab() else {
+            return 0;
+        };
+        let mut fallback = None;
+        for idx in 0..tab.visible_rows_map.len() {
+            if tab.visible_rows_map[idx] != row {
+                continue;
+            }
+            fallback.get_or_insert(idx);
+            let start = tab.visible_row_starts.get(idx).copied().unwrap_or(0);
+            let end = tab.visible_row_ends.get(idx).copied().unwrap_or(start);
+            if col >= start && col < end {
+                return idx;
+            }
+            if col >= end {
+                fallback = Some(idx);
+            }
+        }
+        fallback.unwrap_or_else(|| self.visible_index_of_source_row(row))
     }
 
     pub(crate) fn fold_range_starting_at(&self, row: usize) -> Option<&FoldRange> {

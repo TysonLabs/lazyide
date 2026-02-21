@@ -27,6 +27,7 @@ pub(crate) enum KeyAction {
     RefreshTree,
     PrevTab,
     NextTab,
+    ToggleWordWrap,
     // Editor
     GoToDefinition,
     FoldToggle,
@@ -73,6 +74,7 @@ impl KeyAction {
                 | KeyAction::RefreshTree
                 | KeyAction::PrevTab
                 | KeyAction::NextTab
+                | KeyAction::ToggleWordWrap
         )
     }
 
@@ -97,6 +99,7 @@ impl KeyAction {
             KeyAction::RefreshTree => "Refresh Tree",
             KeyAction::PrevTab => "Previous Tab",
             KeyAction::NextTab => "Next Tab",
+            KeyAction::ToggleWordWrap => "Toggle Word Wrap",
             KeyAction::GoToDefinition => "Go to Definition",
             KeyAction::FoldToggle => "Toggle Fold",
             KeyAction::FoldAllToggle => "Toggle Fold All",
@@ -141,6 +144,7 @@ impl KeyAction {
             KeyAction::RefreshTree,
             KeyAction::PrevTab,
             KeyAction::NextTab,
+            KeyAction::ToggleWordWrap,
             KeyAction::GoToDefinition,
             KeyAction::FoldToggle,
             KeyAction::FoldAllToggle,
@@ -386,7 +390,14 @@ impl KeyBind {
     }
 
     pub(crate) fn display(&self) -> String {
-        self.format_bind(true)
+        if cfg!(target_os = "macos") {
+            self.format_bind(true)
+                .replace("Alt+", "⌥+")
+                .replace("Ctrl+", "⌃+")
+                .replace("Shift+", "⇧+")
+        } else {
+            self.format_bind(true)
+        }
     }
 
     pub(crate) fn matches(&self, key: &KeyEvent) -> bool {
@@ -494,6 +505,8 @@ impl KeyBindings {
         bind(KeyAction::RefreshTree, "ctrl+r");
         bind(KeyAction::PrevTab, "f1");
         bind(KeyAction::NextTab, "f2");
+        bind(KeyAction::ToggleWordWrap, "alt+z");
+        bind(KeyAction::ToggleWordWrap, "f6");
 
         // Editor
         bind(KeyAction::GoToDefinition, "ctrl+d");
@@ -852,13 +865,21 @@ mod keybind_tests {
     #[test]
     fn test_keybind_display() {
         let kb = KeyBind::parse("ctrl+shift+f").unwrap();
-        assert_eq!(kb.display(), "Ctrl+Shift+F");
+        if cfg!(target_os = "macos") {
+            assert_eq!(kb.display(), "⌃+⇧+F");
+        } else {
+            assert_eq!(kb.display(), "Ctrl+Shift+F");
+        }
     }
 
     #[test]
     fn test_keybind_display_simple() {
         let kb = KeyBind::parse("ctrl+s").unwrap();
-        assert_eq!(kb.display(), "Ctrl+S");
+        if cfg!(target_os = "macos") {
+            assert_eq!(kb.display(), "⌃+S");
+        } else {
+            assert_eq!(kb.display(), "Ctrl+S");
+        }
     }
 
     #[test]
@@ -945,7 +966,11 @@ mod keybind_tests {
     #[test]
     fn test_display_for_action() {
         let kb = KeyBindings::defaults();
-        assert_eq!(kb.display_for(KeyAction::Save), "Ctrl+S");
+        if cfg!(target_os = "macos") {
+            assert_eq!(kb.display_for(KeyAction::Save), "⌃+S");
+        } else {
+            assert_eq!(kb.display_for(KeyAction::Save), "Ctrl+S");
+        }
         assert_eq!(kb.display_for(KeyAction::Help), "F4");
     }
 

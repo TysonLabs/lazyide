@@ -490,6 +490,8 @@ mod lsp_and_struct_tests {
             bracket_depths: Vec::new(),
             folded_starts: HashSet::new(),
             visible_rows_map: Vec::new(),
+            visible_row_starts: Vec::new(),
+            visible_row_ends: Vec::new(),
             open_doc_uri: None,
             open_doc_version: 0,
             diagnostics: Vec::new(),
@@ -526,6 +528,8 @@ mod lsp_and_struct_tests {
                 s
             },
             visible_rows_map: vec![0, 1, 2, 16, 17],
+            visible_row_starts: vec![0, 0, 0, 0, 0],
+            visible_row_ends: vec![10, 10, 10, 10, 10],
             open_doc_uri: Some("file:///src/main.rs".to_string()),
             open_doc_version: 3,
             diagnostics: vec![LspDiagnostic {

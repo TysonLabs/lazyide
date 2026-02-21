@@ -137,6 +137,8 @@ pub(crate) struct App {
     pub(crate) replace_after_find: bool,
     pub(crate) git_branch: Option<String>,
     pub(crate) enhanced_keys: bool,
+    pub(crate) word_wrap: bool,
+    pub(crate) wrap_width_cache: usize,
     pub(crate) keybinds: KeyBindings,
     pub(crate) keybind_editor: KeybindEditorState,
     pub(crate) git_file_statuses: HashMap<PathBuf, GitFileStatus>,

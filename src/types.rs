@@ -39,6 +39,7 @@ pub(crate) enum CommandAction {
     ReplaceInFile,
     GoToLine,
     Keybinds,
+    ToggleWordWrap,
 }
 
 #[derive(Debug, Clone)]

@@ -360,6 +360,7 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
             &[
                 (&kb.display_for(KeyAction::ToggleFiles), "toggle files"),
                 (&kb.display_for(KeyAction::RefreshTree), "refresh tree"),
+                (&kb.display_for(KeyAction::ToggleWordWrap), "toggle wrap"),
             ],
             key_s,
             desc_s,
