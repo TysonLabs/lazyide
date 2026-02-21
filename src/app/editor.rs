@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::Style;
@@ -15,9 +16,8 @@ use crate::syntax::syntax_lang_for_path;
 use crate::tab::Tab;
 use crate::types::{EditorContextAction, Focus};
 use crate::util::{
-    comment_prefix_for_path, compute_fold_ranges, compute_git_change_summary,
-    compute_git_file_statuses, compute_git_line_status, editor_context_actions, inside,
-    leading_indent_bytes, relative_path, text_to_lines, to_u16_saturating,
+    comment_prefix_for_path, compute_fold_ranges, compute_git_line_status, editor_context_actions,
+    inside, leading_indent_bytes, relative_path, text_to_lines, to_u16_saturating,
 };
 
 impl App {
@@ -337,12 +337,12 @@ impl App {
         tab.conflict_prompt_open = false;
         tab.conflict_disk_text = None;
         self.clear_autosave_for_open_file();
-        // Refresh git statuses after save
-        let line_count = self.tabs[self.active_tab].editor.lines().len();
-        self.tabs[self.active_tab].git_line_status =
-            compute_git_line_status(&self.root, &path, line_count);
-        self.git_file_statuses = compute_git_file_statuses(&self.root);
-        self.git_change_summary = compute_git_change_summary(&self.root);
+        // Trigger an immediate async git refresh so the gutter updates promptly
+        self.fs_refresh_pending = true;
+        self.fs_full_refresh_pending = true;
+        self.last_fs_refresh = Instant::now()
+            .checked_sub(Duration::from_millis(Self::FS_REFRESH_DEBOUNCE_MS + 1))
+            .unwrap_or_else(Instant::now);
         self.set_status(format!(
             "Saved {}",
             relative_path(&self.root, &path).display()
@@ -467,6 +467,51 @@ impl App {
             tab.editor_scroll_row = cursor_visible;
         } else if cursor_visible >= tab.editor_scroll_row + inner_height {
             tab.editor_scroll_row = cursor_visible.saturating_sub(inner_height.saturating_sub(1));
+        }
+    }
+
+    /// After a scroll event, ensure the cursor stays within the visible
+    /// viewport. This prevents `sync_editor_scroll_guess` from snapping
+    /// the viewport back to the old cursor position on the next action.
+    pub(crate) fn clamp_cursor_to_viewport(&mut self) {
+        let inner_height = self.editor_rect.height.saturating_sub(2) as usize;
+        if inner_height == 0 {
+            return;
+        }
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let (cursor_row, cursor_col) = tab.editor.cursor();
+        let cursor_vis = self.visible_index_of_source_row(cursor_row);
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let scroll = tab.editor_scroll_row;
+        let viewport_end = scroll + inner_height;
+
+        // Cursor is already in the viewport — nothing to do.
+        if cursor_vis >= scroll && cursor_vis < viewport_end {
+            return;
+        }
+
+        // Pick the closest viewport edge.
+        let target_vis = if cursor_vis < scroll {
+            scroll
+        } else {
+            viewport_end.saturating_sub(1)
+        };
+
+        let target_row = tab
+            .visible_rows_map
+            .get(target_vis)
+            .copied()
+            .unwrap_or(cursor_row);
+
+        if let Some(tab) = self.active_tab_mut() {
+            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                to_u16_saturating(target_row),
+                to_u16_saturating(cursor_col),
+            ));
         }
     }
 

@@ -251,58 +251,67 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     {
         app.rebuild_visible_rows();
     }
-    let (
-        start_row,
-        lines_src,
-        selection,
-        cursor_row,
-        cursor_col,
-        diagnostics_owned,
-        fold_ranges_owned,
-        folded_starts_owned,
-        visible_rows_map_owned,
-        bracket_depths_owned,
-        git_line_status_owned,
-    ) = if let Some(tab) = app.active_tab() {
+    // Extract scalar values; all tab data is referenced directly via the tab index
+    // to avoid expensive per-frame clones.
+    let tab_idx = app.active_tab;
+    let has_tab = tab_idx < app.tabs.len();
+    let (start_row, selection, cursor_row, cursor_col) = if has_tab {
+        let tab = &app.tabs[tab_idx];
         let sr = tab
             .editor_scroll_row
             .min(tab.visible_rows_map.len().saturating_sub(1));
-        // Only clone lines up to the highest visible row, not the entire buffer
-        let max_row = tab.visible_rows_map.iter().copied().max().unwrap_or(0);
-        let all_lines = tab.editor.lines();
-        let lines: Vec<String> = all_lines[..all_lines.len().min(max_row + 1)].to_vec();
         (
             sr,
-            lines,
             tab.editor.selection_range(),
             tab.editor.cursor().0,
             tab.editor.cursor().1,
-            tab.diagnostics.clone(),
-            tab.fold_ranges.clone(),
-            tab.folded_starts.clone(),
-            tab.visible_rows_map.clone(),
-            tab.bracket_depths.clone(),
-            tab.git_line_status.clone(),
         )
     } else {
-        (
-            0,
-            vec![String::new()],
-            None,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            HashSet::new(),
-            vec![0usize],
-            Vec::new(),
-            Vec::new(),
-        )
+        (0, None, 0, 0)
     };
-    let diagnostics_ref = &diagnostics_owned as &[LspDiagnostic];
-    let fold_ranges_ref = &fold_ranges_owned as &[FoldRange];
-    let folded_starts_ref = &folded_starts_owned;
-    let visible_rows_map_ref = &visible_rows_map_owned as &[usize];
+    // Provide empty fallbacks for the no-tab case
+    let empty_lines: Vec<String> = vec![String::new()];
+    let empty_diagnostics: Vec<LspDiagnostic> = Vec::new();
+    let empty_fold_ranges: Vec<FoldRange> = Vec::new();
+    let empty_folded_starts: HashSet<usize> = HashSet::new();
+    let empty_visible_rows: Vec<usize> = vec![0usize];
+    let empty_bracket_depths: Vec<u16> = Vec::new();
+    let empty_git_line_status: Vec<GitLineStatus> = Vec::new();
+    let lines_ref: &[String] = if has_tab {
+        app.tabs[tab_idx].editor.lines()
+    } else {
+        &empty_lines
+    };
+    let diagnostics_ref: &[LspDiagnostic] = if has_tab {
+        &app.tabs[tab_idx].diagnostics
+    } else {
+        &empty_diagnostics
+    };
+    let fold_ranges_ref: &[FoldRange] = if has_tab {
+        &app.tabs[tab_idx].fold_ranges
+    } else {
+        &empty_fold_ranges
+    };
+    let folded_starts_ref: &HashSet<usize> = if has_tab {
+        &app.tabs[tab_idx].folded_starts
+    } else {
+        &empty_folded_starts
+    };
+    let visible_rows_map_ref: &[usize] = if has_tab {
+        &app.tabs[tab_idx].visible_rows_map
+    } else {
+        &empty_visible_rows
+    };
+    let bracket_depths_ref: &[u16] = if has_tab {
+        &app.tabs[tab_idx].bracket_depths
+    } else {
+        &empty_bracket_depths
+    };
+    let git_line_status_ref: &[GitLineStatus] = if has_tab {
+        &app.tabs[tab_idx].git_line_status
+    } else {
+        &empty_git_line_status
+    };
     let inner_w = inner.width as usize;
     let blank_line = Line::from(Span::styled(
         " ".repeat(inner_w),
@@ -310,34 +319,42 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     ));
     // Precompute indent depths for visible rows (for indent guides)
     let indent_depths: Vec<usize> = {
-        let total = lines_src.len();
+        let total = lines_ref.len();
         let mut depths = vec![0usize; total];
-        // First pass: compute depth for non-blank lines
+        let mut is_blank = vec![false; total];
+        // First pass: compute depth for non-blank lines, mark blanks
         for i in 0..total {
-            let line = &lines_src[i];
+            let line = &lines_ref[i];
             let expanded = line.replace('\t', "    ");
             let leading = expanded.len() - expanded.trim_start_matches(' ').len();
             if expanded.trim().is_empty() {
-                depths[i] = usize::MAX; // sentinel for blank
+                is_blank[i] = true;
+                depths[i] = 0;
             } else {
                 depths[i] = leading / 4;
             }
         }
-        // Second pass: blank lines get min(nearest non-blank above, nearest non-blank below)
+        // O(n) two-pass for blank lines: propagate nearest non-blank above/below
+        let mut above_depth = vec![0usize; total];
+        let mut last = 0usize;
         for i in 0..total {
-            if depths[i] != usize::MAX {
-                continue;
+            if !is_blank[i] {
+                last = depths[i];
             }
-            let above = (0..i)
-                .rev()
-                .find(|&j| depths[j] != usize::MAX)
-                .map(|j| depths[j])
-                .unwrap_or(0);
-            let below = ((i + 1)..total)
-                .find(|&j| depths[j] != usize::MAX)
-                .map(|j| depths[j])
-                .unwrap_or(0);
-            depths[i] = above.min(below);
+            above_depth[i] = last;
+        }
+        let mut below_depth = vec![0usize; total];
+        last = 0;
+        for i in (0..total).rev() {
+            if !is_blank[i] {
+                last = depths[i];
+            }
+            below_depth[i] = last;
+        }
+        for i in 0..total {
+            if is_blank[i] {
+                depths[i] = above_depth[i].min(below_depth[i]);
+            }
         }
         depths
     };
@@ -350,7 +367,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             lines_out.push(blank_line.clone());
             continue;
         };
-        if row >= lines_src.len() {
+        if row >= lines_ref.len() {
             lines_out.push(blank_line.clone());
             continue;
         }
@@ -392,7 +409,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         } else {
             spans.push(Span::raw(" "));
         }
-        let git_status = git_line_status_owned
+        let git_status = git_line_status_ref
             .get(row)
             .copied()
             .unwrap_or(GitLineStatus::None);
@@ -411,9 +428,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             }
         }
         spans.push(Span::raw(" "));
-        let display_line = lines_src[row].replace('\t', "    ");
+        let display_line = lines_ref[row].replace('\t', "    ");
         let bracket_colors = [theme.bracket_1, theme.bracket_2, theme.bracket_3];
-        let bd = bracket_depths_owned.get(row).copied().unwrap_or(0);
+        let bd = bracket_depths_ref.get(row).copied().unwrap_or(0);
         let hl = highlight_line(&display_line, lang, &theme, bd, &bracket_colors);
         let guide_depth = indent_depths.get(row).copied().unwrap_or(0);
         let content_spans = apply_indent_guides(hl.spans, guide_depth, guide_style);
@@ -441,7 +458,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             hl
         };
         let hl = if selection.is_some()
-            && row_has_selection(row, lines_src[row].chars().count(), selection)
+            && row_has_selection(row, lines_ref[row].chars().count(), selection)
         {
             hl.patch_style(Style::default().bg(theme.selection))
         } else {
@@ -464,7 +481,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     }
     let editor_text = Paragraph::new(lines_out).style(Style::default().bg(theme.bg).fg(theme.fg));
     frame.render_widget(editor_text, inner);
-    if app.focus == Focus::Editor {
+    if app.focus == Focus::Editor && has_tab {
         let cursor_visible = app.visible_index_of_source_row(cursor_row);
         let cursor_y = cursor_visible.saturating_sub(start_row);
         if cursor_y < visible_rows {

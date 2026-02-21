@@ -86,6 +86,8 @@ impl App {
         self.selected = selected_path
             .and_then(|p| self.tree.iter().position(|i| i.path == p))
             .unwrap_or(0);
+        // Invalidate the cached file list; it will be rebuilt lazily when needed.
+        self.cached_file_list.clear();
         Ok(())
     }
 
@@ -167,14 +169,19 @@ impl App {
     }
 
     pub(crate) fn refresh_file_picker_results(&mut self) {
+        // Lazily rebuild the file list if it was invalidated
+        if self.cached_file_list.is_empty() {
+            let mut files = Vec::new();
+            collect_all_files(&self.root, &mut files);
+            self.cached_file_list = files;
+        }
         let query = self.file_picker_query.to_ascii_lowercase();
-        let mut all_files = Vec::new();
-        collect_all_files(&self.root, &mut all_files);
-        let mut scored: Vec<(usize, PathBuf)> = all_files
-            .into_iter()
+        let mut scored: Vec<(usize, PathBuf)> = self
+            .cached_file_list
+            .iter()
             .filter_map(|path| {
-                let rel = relative_path(&self.root, &path).display().to_string();
-                fuzzy_score(&query, &rel).map(|score| (score, path))
+                let rel = relative_path(&self.root, path).display().to_string();
+                fuzzy_score(&query, &rel).map(|score| (score, path.clone()))
             })
             .collect();
         scored.sort_by(|(sa, pa), (sb, pb)| {
@@ -619,5 +626,62 @@ mod tests {
         assert_eq!(app.status, "Name must be a single path component");
         assert!(file.exists());
         assert!(!root.join("a").join("b.txt").exists());
+    }
+
+    #[test]
+    fn cached_file_list_populated_on_init() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::write(root.join("a.rs"), "fn a() {}\n").expect("write a");
+        fs::write(root.join("b.rs"), "fn b() {}\n").expect("write b");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src/c.rs"), "fn c() {}\n").expect("write c");
+        let mut app = new_app(root);
+        // Cache starts empty (lazy); trigger lazy rebuild via file picker
+        assert!(app.cached_file_list.is_empty(), "cache should start empty");
+        app.refresh_file_picker_results();
+        assert!(
+            app.cached_file_list.len() >= 3,
+            "cached_file_list should contain at least the 3 created files, got {}",
+            app.cached_file_list.len()
+        );
+        assert!(app.cached_file_list.iter().any(|p| p.ends_with("a.rs")));
+        assert!(app.cached_file_list.iter().any(|p| p.ends_with("b.rs")));
+        assert!(app
+            .cached_file_list
+            .iter()
+            .any(|p| p.ends_with("src/c.rs") || p.ends_with("src\\c.rs")));
+    }
+
+    #[test]
+    fn file_picker_uses_cached_list() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::write(root.join("main.rs"), "fn main() {}\n").expect("write main");
+        fs::write(root.join("lib.rs"), "pub fn lib() {}\n").expect("write lib");
+        let mut app = new_app(root);
+        app.file_picker_open = true;
+        app.file_picker_query = "main".to_string();
+        app.refresh_file_picker_results();
+        assert!(
+            !app.file_picker_results.is_empty(),
+            "should find main.rs via cached list"
+        );
+        assert!(app.file_picker_results[0].ends_with("main.rs"));
+    }
+
+    #[test]
+    fn file_picker_empty_query_returns_all() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::write(root.join("a.txt"), "a\n").expect("write a");
+        fs::write(root.join("b.txt"), "b\n").expect("write b");
+        let mut app = new_app(root);
+        app.file_picker_query.clear();
+        app.refresh_file_picker_results();
+        assert!(
+            app.file_picker_results.len() >= 2,
+            "empty query should return all files"
+        );
     }
 }
