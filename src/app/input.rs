@@ -317,17 +317,21 @@ impl App {
                 MouseEventKind::Moved => {
                     if self.editor_dragging {
                         self.extend_mouse_selection(mouse.column, mouse.row);
+                    } else {
+                        return Ok(());
                     }
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
                     self.editor_dragging = false;
                     self.editor_drag_anchor = None;
+                    return Ok(());
                 }
                 MouseEventKind::Down(MouseButton::Right) => {
                     self.focus = Focus::Editor;
                     self.editor_context_menu_pos = (mouse.column, mouse.row);
                     self.editor_context_menu_index = 0;
                     self.editor_context_menu_open = true;
+                    return Ok(());
                 }
                 MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                     if self
