@@ -536,6 +536,7 @@ impl App {
             }
             KeyAction::Copy => self.copy_selection_to_clipboard(),
             KeyAction::Cut => self.cut_selection_to_clipboard(),
+            KeyAction::CutLine => self.cut_line(),
             KeyAction::Paste => self.paste_from_clipboard(),
             KeyAction::ToggleComment => self.toggle_comment(),
             KeyAction::PageDown => self.page_down(),
