@@ -263,6 +263,24 @@ impl App {
         }
     }
 
+    /// Handle a bracketed paste event from the terminal. Inserts text
+    /// directly into the editor, bypassing auto-pair logic.
+    pub(crate) fn handle_paste(&mut self, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        if self.active_tab_mut().is_none() {
+            return;
+        }
+        let inserted = self
+            .active_tab_mut()
+            .is_some_and(|t| t.editor.insert_str(&text));
+        if inserted {
+            self.on_editor_content_changed();
+            self.set_status("Pasted");
+        }
+    }
+
     pub(crate) fn paste_from_clipboard(&mut self) {
         let mut from_system = false;
         if let Some(clipboard) = self.clipboard.as_mut() {

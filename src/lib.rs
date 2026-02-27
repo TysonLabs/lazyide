@@ -6,8 +6,8 @@ use std::time::Duration;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -58,7 +58,12 @@ pub fn run() -> io::Result<()> {
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
 
     let enhanced_keys =
         ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
@@ -73,7 +78,12 @@ pub fn run() -> io::Result<()> {
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            DisableBracketedPaste
+        );
         original_hook(info);
     }));
 
@@ -89,7 +99,12 @@ pub fn run() -> io::Result<()> {
     if enhanced_keys {
         let _ = execute!(stdout, PopKeyboardEnhancementFlags);
     }
-    execute!(stdout, LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        stdout,
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        DisableBracketedPaste
+    )?;
 
     result
 }
@@ -125,6 +140,9 @@ fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io
                         if let Err(err) = app.handle_mouse(mouse) {
                             app.set_status(format!("Action failed: {err}"));
                         }
+                    }
+                    Event::Paste(text) => {
+                        app.handle_paste(text);
                     }
                     _ => {}
                 }
