@@ -78,6 +78,7 @@ impl App {
                 rect: Rect::default(),
             },
             prompt: None,
+            prompt_rect: Rect::default(),
             clipboard: Clipboard::new().ok(),
             editor_context_menu_open: false,
             editor_context_menu_index: 0,
@@ -424,6 +425,7 @@ impl App {
         self.prompt = Some(PromptState {
             title: "Find in file (regex)".to_string(),
             value: String::new(),
+            cursor: 0,
             mode: PromptMode::FindInFile,
         });
     }
@@ -432,6 +434,7 @@ impl App {
         self.prompt = Some(PromptState {
             title: "Search in files (ripgrep)".to_string(),
             value: String::new(),
+            cursor: 0,
             mode: PromptMode::FindInProject,
         });
     }
@@ -440,6 +443,7 @@ impl App {
         self.prompt = Some(PromptState {
             title: "Go to line".to_string(),
             value: String::new(),
+            cursor: 0,
             mode: PromptMode::GoToLine,
         });
     }

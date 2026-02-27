@@ -58,11 +58,36 @@ impl App {
                 self.apply_prompt(mode, value)?;
             }
             (_, KeyCode::Backspace) => {
-                prompt.value.pop();
+                if prompt.cursor > 0 {
+                    prompt.value.remove(prompt.cursor - 1);
+                    prompt.cursor -= 1;
+                }
+            }
+            (_, KeyCode::Delete) => {
+                if prompt.cursor < prompt.value.len() {
+                    prompt.value.remove(prompt.cursor);
+                }
+            }
+            (_, KeyCode::Left) => {
+                if prompt.cursor > 0 {
+                    prompt.cursor -= 1;
+                }
+            }
+            (_, KeyCode::Right) => {
+                if prompt.cursor < prompt.value.len() {
+                    prompt.cursor += 1;
+                }
+            }
+            (_, KeyCode::Home) => {
+                prompt.cursor = 0;
+            }
+            (_, KeyCode::End) => {
+                prompt.cursor = prompt.value.len();
             }
             (_, KeyCode::Char(c)) => {
                 if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                    prompt.value.push(c);
+                    prompt.value.insert(prompt.cursor, c);
+                    prompt.cursor += 1;
                 }
             }
             _ => {}

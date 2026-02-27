@@ -592,16 +592,26 @@ pub(crate) fn render_prompt(app: &mut App, frame: &mut Frame<'_>) {
     let Some(prompt) = app.prompt.as_ref() else {
         return;
     };
-    let theme = app.active_theme();
+    let title = prompt.title.clone();
+    let value = prompt.value.clone();
+    let cursor_pos = prompt.cursor;
+    let theme = app.active_theme().clone();
     let area = centered_rect(60, 20, frame.area());
+    app.prompt_rect = area;
     frame.render_widget(Clear, area);
-    let input = Paragraph::new(prompt.value.clone()).block(
-        themed_block(theme)
-            .title(prompt.title.as_str())
+    let input = Paragraph::new(value).block(
+        themed_block(&theme)
+            .title(title.as_str())
             .border_style(Style::default().fg(theme.accent))
             .style(Style::default().bg(theme.bg_alt).fg(theme.fg)),
     );
     frame.render_widget(input, area);
+    // Show a visible cursor at the current position in the input text
+    let cursor_x = area.x + 1 + cursor_pos as u16;
+    let cursor_y = area.y + 1;
+    if cursor_x < area.right() {
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 fn render_dialog(

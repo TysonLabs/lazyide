@@ -109,6 +109,7 @@ pub(crate) struct App {
     pub(crate) tab_rects: Vec<(Rect, Rect)>,
     pub(crate) context_menu: ContextMenuState,
     pub(crate) prompt: Option<PromptState>,
+    pub(crate) prompt_rect: Rect,
     pub(crate) clipboard: Option<Clipboard>,
     pub(crate) editor_context_menu_open: bool,
     pub(crate) editor_context_menu_index: usize,

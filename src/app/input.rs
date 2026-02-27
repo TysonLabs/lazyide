@@ -121,7 +121,7 @@ impl App {
             return Ok(());
         }
 
-        // Modal states: allow left-click to dismiss, block everything else
+        // Modal states: handle prompt clicks or dismiss on click outside
         if self.prompt.is_some()
             || matches!(
                 self.pending,
@@ -132,6 +132,17 @@ impl App {
                 .is_some_and(|t| t.recovery_prompt_open || t.conflict_prompt_open)
         {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                // If prompt is open and click is inside the input area, move cursor
+                if self.prompt.is_some()
+                    && inside(mouse.column, mouse.row, self.prompt_rect)
+                {
+                    let inner_x =
+                        mouse.column.saturating_sub(self.prompt_rect.x + 1) as usize;
+                    if let Some(prompt) = self.prompt.as_mut() {
+                        prompt.cursor = inner_x.min(prompt.value.len());
+                    }
+                    return Ok(());
+                }
                 // Dismiss the modal on click outside (Esc-equivalent)
                 if self.prompt.is_some() {
                     self.prompt = None;

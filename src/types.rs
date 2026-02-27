@@ -46,6 +46,7 @@ pub(crate) enum CommandAction {
 pub(crate) struct PromptState {
     pub(crate) title: String,
     pub(crate) value: String,
+    pub(crate) cursor: usize,
     pub(crate) mode: PromptMode,
 }
 

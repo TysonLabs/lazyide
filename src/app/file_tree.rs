@@ -382,6 +382,7 @@ impl App {
                     self.prompt = Some(PromptState {
                         title: format!("Replace '{}' with", value),
                         value: String::new(),
+                        cursor: 0,
                         mode: PromptMode::ReplaceInFile { search: value },
                     });
                 }
@@ -443,6 +444,7 @@ impl App {
                         relative_path(&self.root, &parent).display()
                     ),
                     value: String::new(),
+                    cursor: 0,
                     mode: PromptMode::NewFile { parent },
                 });
             }
@@ -458,6 +460,7 @@ impl App {
                         relative_path(&self.root, &parent).display()
                     ),
                     value: String::new(),
+                    cursor: 0,
                     mode: PromptMode::NewFolder { parent },
                 });
             }
@@ -470,9 +473,11 @@ impl App {
                     .file_name()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_default();
+                let cursor = default_name.len();
                 self.prompt = Some(PromptState {
                     title: "Rename to".to_string(),
                     value: default_name,
+                    cursor,
                     mode: PromptMode::Rename { target },
                 });
             }
