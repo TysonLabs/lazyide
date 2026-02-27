@@ -26,6 +26,19 @@ Inspired by [lazygit](https://github.com/jesseduffield/lazygit) and [lazyssh](ht
 
 ## Install
 
+**Linux / macOS / WSL2:**
+```bash
+curl -fsSL https://tysonlabs.dev/lazyide/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://tysonlabs.dev/lazyide/install.ps1 | iex
+```
+
+<details>
+<summary>More install options</summary>
+
 **macOS (Homebrew):**
 ```bash
 brew tap tgeorge06/tap
@@ -37,6 +50,16 @@ brew install lazyide
 scoop bucket add lazyide https://github.com/tgeorge06/scoop-bucket
 scoop install lazyide
 ```
+
+**Shell script options:**
+```bash
+curl -fsSL https://tysonlabs.dev/lazyide/install.sh -o install.sh
+sh install.sh --with-deps          # also install ripgrep + rust-analyzer
+sh install.sh --prefix /usr/local/bin
+sh install.sh --version v0.3.0     # specific version
+```
+
+</details>
 
 **From source (all platforms):**
 ```bash
