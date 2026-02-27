@@ -38,6 +38,10 @@ impl App {
 
     pub(crate) fn new(root: PathBuf) -> io::Result<Self> {
         let themes = load_themes();
+        let default_theme_index = themes
+            .iter()
+            .position(|t| t.name == "One Dark Pro")
+            .unwrap_or(0);
         let mut expanded = HashSet::new();
         expanded.insert(root.clone());
         let mut app = Self {
@@ -63,10 +67,10 @@ impl App {
             menu_rect: Rect::default(),
             theme_browser_open: false,
             theme_browser_rect: Rect::default(),
-            theme_index: 0,
-            preview_revert_index: 0,
+            theme_index: default_theme_index,
+            preview_revert_index: default_theme_index,
             themes,
-            active_theme_index: 0,
+            active_theme_index: default_theme_index,
             help_open: false,
             tree_expand_btn_rect: Rect::default(),
             tree_collapse_btn_rect: Rect::default(),
