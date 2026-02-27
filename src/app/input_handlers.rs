@@ -938,7 +938,7 @@ impl App {
         if y < start || y >= end {
             return None;
         }
-        let idx = (y - start) as usize;
+        let idx = (y - start) as usize + self.tree_state.offset();
         if idx < self.tree.len() {
             Some(idx)
         } else {

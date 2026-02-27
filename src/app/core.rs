@@ -1,4 +1,5 @@
 use super::{App, CompletionState, ContextMenuState, KeybindEditorState, SearchResultsState};
+use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -43,6 +44,7 @@ impl App {
             root,
             tree: Vec::new(),
             selected: 0,
+            tree_state: ListState::default(),
             expanded,
             focus: Focus::Tree,
             tabs: Vec::new(),

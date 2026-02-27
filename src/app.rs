@@ -7,6 +7,7 @@ use std::time::Instant;
 use arboard::Clipboard;
 use notify::RecommendedWatcher;
 use ratatui::layout::Rect;
+use ratatui::widgets::ListState;
 
 use crate::keybinds::{KeyAction, KeyBind, KeyBindings};
 use crate::lsp_client::{LspClient, LspCompletionItem};
@@ -80,6 +81,7 @@ pub(crate) struct App {
     pub(crate) root: PathBuf,
     pub(crate) tree: Vec<TreeItem>,
     pub(crate) selected: usize,
+    pub(crate) tree_state: ListState,
     pub(crate) expanded: HashSet<PathBuf>,
     pub(crate) focus: Focus,
     pub(crate) tabs: Vec<Tab>,

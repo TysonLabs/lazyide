@@ -10,7 +10,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
@@ -140,8 +140,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                 )))
             })
             .collect();
-        let mut tree_state = ListState::default();
-        tree_state.select(Some(app.selected));
+        app.tree_state.select(Some(app.selected));
         let tree = List::new(tree_items)
             .highlight_style(
                 Style::default()
@@ -156,7 +155,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                     .border_style(Style::default().fg(left_border))
                     .style(Style::default().bg(theme.bg_alt).fg(theme.fg)),
             );
-        frame.render_stateful_widget(tree, tree_area, &mut tree_state);
+        frame.render_stateful_widget(tree, tree_area, &mut app.tree_state);
         // Render [+][-] buttons right-aligned in the title bar row
         {
             let btn_width = 6u16; // "[+][-]"
