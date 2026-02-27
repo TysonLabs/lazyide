@@ -225,7 +225,7 @@ mod lsp_and_struct_tests {
     use std::io::Cursor;
     use std::path::PathBuf;
     use std::sync::mpsc;
-    use tui_textarea::TextArea;
+    use ratatui_textarea::TextArea;
 
     #[test]
     fn test_lsp_reader_loop_valid_notification() {

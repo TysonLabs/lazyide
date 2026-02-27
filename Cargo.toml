@@ -7,10 +7,10 @@ edition = "2024"
 arboard = "3.4"
 include_dir = "0.7.4"
 notify = "6"
-ratatui = "0.29"
+ratatui = "0.30"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tui-textarea = { version = "0.7", features = ["search"] }
+ratatui-textarea = { version = "0.8", features = ["search"] }
 unicode-width = "0.2.0"
 url = "2"
 

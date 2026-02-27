@@ -403,7 +403,7 @@ impl App {
                         let max_line = tab.editor.lines().len().saturating_sub(1);
                         let clamped = target.min(max_line);
                         tab.editor.cancel_selection();
-                        tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                        tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                             to_u16_saturating(clamped),
                             0,
                         ));

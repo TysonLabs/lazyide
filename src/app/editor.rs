@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::Style;
 use serde_json::json;
-use tui_textarea::TextArea;
+use ratatui_textarea::TextArea;
 
 use crate::keybinds::{KeyAction, KeyScope};
 use crate::persistence::autosave_path_for;
@@ -148,7 +148,7 @@ impl App {
         let mut ta = TextArea::from(lines);
         ta.set_cursor_line_style(Style::default().bg(self.active_theme().bg_alt));
         ta.set_selection_style(Style::default().bg(self.active_theme().selection));
-        ta.move_cursor(tui_textarea::CursorMove::Jump(
+        ta.move_cursor(ratatui_textarea::CursorMove::Jump(
             to_u16_saturating(cursor.0),
             to_u16_saturating(cursor.1),
         ));
@@ -200,27 +200,27 @@ impl App {
         let tab = &mut self.tabs[self.active_tab];
         if is_last_line && row > 0 {
             // Last line: select from end of previous line through end of this line
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(row - 1),
                 u16::MAX,
             ));
             tab.editor.start_selection();
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(row),
                 u16::MAX,
             ));
         } else if total_lines == 1 {
             // Only one line: select all text on it
             tab.editor
-                .move_cursor(tui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
+                .move_cursor(ratatui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
             tab.editor.start_selection();
-            tab.editor.move_cursor(tui_textarea::CursorMove::End);
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::End);
         } else {
             // Select from start of this line to start of next line
             tab.editor
-                .move_cursor(tui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
+                .move_cursor(ratatui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
             tab.editor.start_selection();
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(row + 1),
                 0,
             ));
@@ -617,7 +617,7 @@ impl App {
             .unwrap_or(cursor_row);
 
         if let Some(tab) = self.active_tab_mut() {
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(target_row),
                 to_u16_saturating(cursor_col),
             ));
@@ -661,7 +661,7 @@ impl App {
             .max(target_start_col)
             .min(target_lines);
         if let Some(tab) = self.active_tab_mut() {
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(target_row),
                 to_u16_saturating(col),
             ));
@@ -701,7 +701,7 @@ impl App {
             .map_or(0, |l| l.chars().count());
         let target_col = cursor_col.max(target_start).min(target_end).min(line_len);
         if let Some(tab) = self.active_tab_mut() {
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(target_row),
                 to_u16_saturating(target_col),
             ));
@@ -784,18 +784,18 @@ impl App {
         // ends up at the beginning of the line rather than the next line.
         if let Some(tab) = self.active_tab_mut() {
             if row + 1 < total {
-                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(row + 1),
                     0,
                 ));
             } else {
-                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(row),
                     to_u16_saturating(line_len),
                 ));
             }
             tab.editor.start_selection();
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(row),
                 0,
             ));
@@ -817,7 +817,7 @@ impl App {
         // Select from start of first line to start of line after last (or end of last line)
         if let Some(tab) = self.active_tab_mut() {
             if end + 1 < total {
-                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(end + 1),
                     0,
                 ));
@@ -827,13 +827,13 @@ impl App {
                     .lines()
                     .get(end)
                     .map_or(0, |l| l.chars().count());
-                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(end),
                     to_u16_saturating(line_len),
                 ));
             }
             tab.editor.start_selection();
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(start),
                 0,
             ));
@@ -853,12 +853,12 @@ impl App {
             (self.editor_drag_anchor, self.editor_pos_from_mouse(x, y))
         {
             if let Some(tab) = self.active_tab_mut() {
-                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(anchor_row),
                     to_u16_saturating(anchor_col),
                 ));
                 tab.editor.start_selection();
-                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(row),
                     to_u16_saturating(col),
                 ));
@@ -938,7 +938,7 @@ mod tests {
         // Move cursor to line 1 (bbb)
         app.tabs[app.active_tab]
             .editor
-            .move_cursor(tui_textarea::CursorMove::Jump(1, 0));
+            .move_cursor(ratatui_textarea::CursorMove::Jump(1, 0));
         app.cut_line();
         let lines = app.tabs[app.active_tab].editor.lines().to_vec();
         assert_eq!(lines, vec!["aaa", "ccc", ""]);
@@ -955,7 +955,7 @@ mod tests {
         // Move cursor to last content line (index 2 is the empty trailing line)
         app.tabs[app.active_tab]
             .editor
-            .move_cursor(tui_textarea::CursorMove::Jump(2, 0));
+            .move_cursor(ratatui_textarea::CursorMove::Jump(2, 0));
         app.cut_line();
         let lines = app.tabs[app.active_tab].editor.lines().to_vec();
         assert_eq!(lines, vec!["aaa", "bbb"]);

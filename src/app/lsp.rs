@@ -97,7 +97,7 @@ impl App {
             self.open_file(path)?;
         }
         if let Some(tab) = self.active_tab_mut() {
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(line),
                 to_u16_saturating(col),
             ));
@@ -140,7 +140,7 @@ impl App {
                 let col = line.find("fn ").unwrap_or(0);
                 self.tabs[self.active_tab]
                     .editor
-                    .move_cursor(tui_textarea::CursorMove::Jump(
+                    .move_cursor(ratatui_textarea::CursorMove::Jump(
                         to_u16_saturating(i),
                         to_u16_saturating(col),
                     ));

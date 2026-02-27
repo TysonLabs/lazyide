@@ -115,7 +115,7 @@ impl App {
         self.open_file(hit.path.clone())?;
         let target_row = hit.line.saturating_sub(1);
         if let Some(tab) = self.active_tab_mut() {
-            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(target_row),
                 0,
             ));

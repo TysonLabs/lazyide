@@ -304,7 +304,7 @@ impl App {
                     }
                     if let Some((row, col)) = self.editor_pos_from_mouse(mouse.column, mouse.row) {
                         if let Some(tab) = self.active_tab_mut() {
-                            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                                 to_u16_saturating(row),
                                 to_u16_saturating(col),
                             ));

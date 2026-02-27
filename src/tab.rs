@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use tui_textarea::TextArea;
+use ratatui_textarea::TextArea;
 
 use crate::lsp_client::LspDiagnostic;
 

@@ -5,7 +5,7 @@ use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::Rect;
-use tui_textarea::Input;
+use ratatui_textarea::Input;
 
 use crate::keybinds::{
     KeyAction, KeyBind, KeyBindings, KeyScope, save_keybindings, selected_action,
@@ -347,7 +347,7 @@ impl App {
                         .is_some_and(|t| t.editor.insert_str(pair));
                     if inserted {
                         if let Some(tab) = self.active_tab_mut() {
-                            tab.editor.move_cursor(tui_textarea::CursorMove::Back);
+                            tab.editor.move_cursor(ratatui_textarea::CursorMove::Back);
                         }
                         self.on_editor_content_changed();
                         self.set_status("Auto-pair inserted");
@@ -543,7 +543,7 @@ impl App {
             KeyAction::PageUp => self.page_up(),
             KeyAction::GoToStart => {
                 if let Some(tab) = self.active_tab_mut() {
-                    tab.editor.move_cursor(tui_textarea::CursorMove::Jump(0, 0));
+                    tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(0, 0));
                 }
                 self.sync_editor_scroll_guess();
                 self.set_status("Top of file");
@@ -553,7 +553,7 @@ impl App {
                     let last_row = tab.editor.lines().len().saturating_sub(1);
                     let last_col = tab.editor.lines().last().map_or(0, |l| l.len());
                     if let Some(tab) = self.active_tab_mut() {
-                        tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                        tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                             to_u16_saturating(last_row),
                             to_u16_saturating(last_col),
                         ));
