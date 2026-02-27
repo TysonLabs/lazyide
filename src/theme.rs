@@ -1,9 +1,107 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use include_dir::{Dir, include_dir};
 use ratatui::style::Color;
 use serde::Deserialize;
+
+fn supports_true_color() -> bool {
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        // COLORTERM is the most reliable signal
+        if let Ok(ct) = std::env::var("COLORTERM") {
+            let ct = ct.to_lowercase();
+            if ct == "truecolor" || ct == "24bit" {
+                return true;
+            }
+        }
+
+        let term = std::env::var("TERM").unwrap_or_default().to_lowercase();
+
+        // GNU screen without -direct doesn't support true color
+        if term.starts_with("screen") && !term.contains("-direct") {
+            return false;
+        }
+
+        // Known true-color terminal programs
+        if let Ok(tp) = std::env::var("TERM_PROGRAM") {
+            let tp = tp.to_lowercase();
+            if matches!(
+                tp.as_str(),
+                "iterm.app" | "hyper" | "wezterm" | "alacritty" | "ghostty"
+            ) {
+                return true;
+            }
+        }
+
+        // Default: assume true color (most modern terminals support it)
+        true
+    })
+}
+
+fn rgb_to_256(r: u8, g: u8, b: u8) -> Color {
+    // Check if it's close to a grayscale value (232-255: 24-step grayscale)
+    if r == g && g == b {
+        if r < 8 {
+            return Color::Indexed(16); // black
+        }
+        if r > 248 {
+            return Color::Indexed(231); // white
+        }
+        let idx = ((r as u16 - 8) * 24 / 247) as u8;
+        return Color::Indexed(232 + idx);
+    }
+
+    // Map to 6x6x6 color cube (indices 16-231)
+    let ri = ((r as u16) * 5 / 255) as u8;
+    let gi = ((g as u16) * 5 / 255) as u8;
+    let bi = ((b as u16) * 5 / 255) as u8;
+    let cube_idx = 16 + 36 * ri + 6 * gi + bi;
+
+    // Also check the nearest grayscale and pick whichever is closer
+    let gray_avg = ((r as u16 + g as u16 + b as u16) / 3) as u8;
+    let gray_idx = if gray_avg < 8 {
+        232
+    } else if gray_avg > 248 {
+        255
+    } else {
+        232 + ((gray_avg as u16 - 8) * 24 / 247) as u8
+    };
+
+    // Compare distances
+    let cube_r = ri as i32 * 255 / 5;
+    let cube_g = gi as i32 * 255 / 5;
+    let cube_b = bi as i32 * 255 / 5;
+    let cube_dist = (r as i32 - cube_r).pow(2)
+        + (g as i32 - cube_g).pow(2)
+        + (b as i32 - cube_b).pow(2);
+
+    let gray_val = if gray_idx == 232 {
+        8
+    } else if gray_idx == 255 {
+        238 + 10 // last grayscale step
+    } else {
+        8 + (gray_idx - 232) as i32 * 247 / 24 + 247 / 48
+    };
+    let gray_dist = (r as i32 - gray_val).pow(2)
+        + (g as i32 - gray_val).pow(2)
+        + (b as i32 - gray_val).pow(2);
+
+    if gray_dist < cube_dist {
+        Color::Indexed(gray_idx)
+    } else {
+        Color::Indexed(cube_idx)
+    }
+}
+
+fn make_color(r: u8, g: u8, b: u8) -> Color {
+    if supports_true_color() {
+        Color::Rgb(r, g, b)
+    } else {
+        rgb_to_256(r, g, b)
+    }
+}
 
 const LOCAL_THEME_DIR: &str = "themes";
 static EMBEDDED_THEMES: Dir = include_dir!("$CARGO_MANIFEST_DIR/themes");
@@ -84,7 +182,7 @@ pub(crate) fn color_from_hex(input: &str, fallback: Color) -> Color {
         let g = u8::from_str_radix(&stripped[2..4], 16).ok();
         let b = u8::from_str_radix(&stripped[4..6], 16).ok();
         if let (Some(r), Some(g), Some(b)) = (r, g, b) {
-            return Color::Rgb(r, g, b);
+            return make_color(r, g, b);
         }
     }
     fallback
@@ -92,68 +190,68 @@ pub(crate) fn color_from_hex(input: &str, fallback: Color) -> Color {
 
 pub(crate) fn theme_from_file(tf: ThemeFile) -> Theme {
     let syn = tf.syntax.as_ref();
-    let border_color = color_from_hex(&tf.colors.border, Color::Rgb(127, 122, 88));
-    let fg_muted = color_from_hex(&tf.colors.foreground_muted, Color::Rgb(100, 100, 120));
+    let border_color = color_from_hex(&tf.colors.border, make_color(127, 122, 88));
+    let fg_muted = color_from_hex(&tf.colors.foreground_muted, make_color(100, 100, 120));
     Theme {
         name: tf.name,
         theme_type: tf.theme_type,
-        bg: color_from_hex(&tf.colors.background, Color::Rgb(20, 22, 31)),
-        bg_alt: color_from_hex(&tf.colors.background_alt, Color::Rgb(25, 28, 39)),
-        fg: color_from_hex(&tf.colors.foreground, Color::Rgb(215, 213, 189)),
+        bg: color_from_hex(&tf.colors.background, make_color(20, 22, 31)),
+        bg_alt: color_from_hex(&tf.colors.background_alt, make_color(25, 28, 39)),
+        fg: color_from_hex(&tf.colors.foreground, make_color(215, 213, 189)),
         fg_muted,
         border: border_color,
-        accent: color_from_hex(&tf.colors.accent, Color::Rgb(206, 198, 130)),
+        accent: color_from_hex(&tf.colors.accent, make_color(206, 198, 130)),
         accent_secondary: tf
             .colors
             .accent_secondary
             .as_ref()
-            .map_or(Color::Rgb(86, 156, 214), |c| {
-                color_from_hex(c, Color::Rgb(86, 156, 214))
+            .map_or(make_color(86, 156, 214), |c| {
+                color_from_hex(c, make_color(86, 156, 214))
             }),
-        selection: color_from_hex(&tf.colors.selection, Color::Rgb(51, 70, 124)),
+        selection: color_from_hex(&tf.colors.selection, make_color(51, 70, 124)),
         comment: syn
             .and_then(|s| s.comment.as_ref())
             .map_or(fg_muted, |c| color_from_hex(c, fg_muted)),
         syntax_string: syn
             .and_then(|s| s.string.as_ref())
-            .map_or(Color::Rgb(156, 220, 140), |c| {
-                color_from_hex(c, Color::Rgb(156, 220, 140))
+            .map_or(make_color(156, 220, 140), |c| {
+                color_from_hex(c, make_color(156, 220, 140))
             }),
         syntax_number: syn
             .and_then(|s| s.number.as_ref())
-            .map_or(Color::Rgb(181, 206, 168), |c| {
-                color_from_hex(c, Color::Rgb(181, 206, 168))
+            .map_or(make_color(181, 206, 168), |c| {
+                color_from_hex(c, make_color(181, 206, 168))
             }),
         syntax_tag: syn
             .and_then(|s| s.tag.as_ref())
-            .map_or(Color::Rgb(86, 156, 214), |c| {
-                color_from_hex(c, Color::Rgb(86, 156, 214))
+            .map_or(make_color(86, 156, 214), |c| {
+                color_from_hex(c, make_color(86, 156, 214))
             }),
         syntax_attribute: syn
             .and_then(|s| s.attribute.as_ref())
-            .map_or(Color::Rgb(78, 201, 176), |c| {
-                color_from_hex(c, Color::Rgb(78, 201, 176))
+            .map_or(make_color(78, 201, 176), |c| {
+                color_from_hex(c, make_color(78, 201, 176))
             }),
         bracket_1: tf
             .colors
             .yellow
             .as_ref()
-            .map_or(Color::Rgb(210, 168, 75), |c| {
-                color_from_hex(c, Color::Rgb(210, 168, 75))
+            .map_or(make_color(210, 168, 75), |c| {
+                color_from_hex(c, make_color(210, 168, 75))
             }),
         bracket_2: tf
             .colors
             .purple
             .as_ref()
-            .map_or(Color::Rgb(176, 82, 204), |c| {
-                color_from_hex(c, Color::Rgb(176, 82, 204))
+            .map_or(make_color(176, 82, 204), |c| {
+                color_from_hex(c, make_color(176, 82, 204))
             }),
         bracket_3: tf
             .colors
             .cyan
             .as_ref()
-            .map_or(Color::Rgb(0, 175, 215), |c| {
-                color_from_hex(c, Color::Rgb(0, 175, 215))
+            .map_or(make_color(0, 175, 215), |c| {
+                color_from_hex(c, make_color(0, 175, 215))
             }),
     }
 }

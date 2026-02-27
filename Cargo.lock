@@ -895,7 +895,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lazyide"
-version = "0.3.85"
+version = "0.3.86"
 dependencies = [
  "arboard",
  "include_dir",
