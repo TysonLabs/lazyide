@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Repo = "tgeorge06/lazyide"
+$Repo = "TysonLabs/lazyide"
 $GithubApi = "https://api.github.com"
 $GithubDl = "https://github.com"
 

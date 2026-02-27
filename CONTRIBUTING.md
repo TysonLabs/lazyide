@@ -3,7 +3,7 @@
 ## Getting Started
 
 ```bash
-git clone https://github.com/tgeorge06/lazyide.git
+git clone https://github.com/TysonLabs/lazyide.git
 cd lazyide
 cargo build && cargo test
 cargo run  # opens current directory
@@ -85,7 +85,7 @@ Add syntax highlighting and bracket pair colors for a polished experience:
 
 ## Bug Reports
 
-Please open an issue on [GitHub Issues](https://github.com/tgeorge06/lazyide/issues) with:
+Please open an issue on [GitHub Issues](https://github.com/TysonLabs/lazyide/issues) with:
 - Steps to reproduce
 - Expected vs actual behavior
 - Terminal emulator and OS

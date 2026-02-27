@@ -104,7 +104,7 @@ jobs:
       - name: Download release tarballs
         run: |
           gh release download "$GITHUB_REF_NAME" \
-            --repo tgeorge06/lazyide \
+            --repo TysonLabs/lazyide \
             --pattern "*.tar.gz" \
             --dir assets
         env:
@@ -123,7 +123,7 @@ jobs:
           AARCH64_HASH="${{ steps.hashes.outputs.macos_aarch64 }}"
           X86_64_HASH="${{ steps.hashes.outputs.macos_x86_64 }}"
 
-          git clone https://x-access-token:${{ secrets.TAP_UPDATE_TOKEN }}@github.com/tgeorge06/homebrew-tap.git tap
+          git clone https://x-access-token:${{ secrets.TAP_UPDATE_TOKEN }}@github.com/TysonLabs/homebrew-tap.git tap
           cd tap
 
           sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/lazyide.rb
@@ -142,12 +142,12 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           WIN_HASH="${{ steps.hashes.outputs.windows_x86_64 }}"
 
-          git clone https://x-access-token:${{ secrets.TAP_UPDATE_TOKEN }}@github.com/tgeorge06/scoop-bucket.git bucket
+          git clone https://x-access-token:${{ secrets.TAP_UPDATE_TOKEN }}@github.com/TysonLabs/scoop-bucket.git bucket
           cd bucket
 
           jq --arg v "$VERSION" --arg h "$WIN_HASH" '
             .version = $v |
-            .architecture."64bit".url = "https://github.com/tgeorge06/lazyide/releases/download/v\($v)/lazyide-windows-x86_64.tar.gz" |
+            .architecture."64bit".url = "https://github.com/TysonLabs/lazyide/releases/download/v\($v)/lazyide-windows-x86_64.tar.gz" |
             .architecture."64bit".hash = $h
           ' lazyide.json > lazyide.json.tmp && mv lazyide.json.tmp lazyide.json
 

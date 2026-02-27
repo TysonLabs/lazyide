@@ -5,7 +5,7 @@
 #        sh install.sh [--prefix <dir>] [--version <tag>] [--with-deps] [--no-deps] [--dry-run] [--no-prompt]
 set -eu
 
-REPO="tgeorge06/lazyide"
+REPO="TysonLabs/lazyide"
 GITHUB_API="https://api.github.com"
 GITHUB_DL="https://github.com"
 
@@ -170,7 +170,7 @@ detect_platform() {
         Darwin) PLATFORM="macos" ;;
         MINGW*|MSYS*|CYGWIN*|Windows_NT)
             err "Windows detected. Use Scoop instead:
-  scoop bucket add lazyide https://github.com/tgeorge06/scoop-bucket
+  scoop bucket add lazyide https://github.com/TysonLabs/scoop-bucket
   scoop install lazyide" ;;
         *) err "Unsupported OS: $OS" ;;
     esac

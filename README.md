@@ -41,13 +41,13 @@ irm https://tysonlabs.dev/lazyide/install.ps1 | iex
 
 **macOS (Homebrew):**
 ```bash
-brew tap tgeorge06/tap
+brew tap TysonLabs/tap
 brew install lazyide
 ```
 
 **Windows (Scoop):**
 ```powershell
-scoop bucket add lazyide https://github.com/tgeorge06/scoop-bucket
+scoop bucket add lazyide https://github.com/TysonLabs/scoop-bucket
 scoop install lazyide
 ```
 
@@ -63,11 +63,11 @@ sh install.sh --version v0.3.0     # specific version
 
 **From source (all platforms):**
 ```bash
-cargo install --git https://github.com/tgeorge06/lazyide
+cargo install --git https://github.com/TysonLabs/lazyide
 ```
 This compiles all dependencies from scratch and may take a few minutes on the first install.
 
-**Prebuilt binaries:** Download from [Releases](https://github.com/tgeorge06/lazyide/releases) for Linux, macOS, and Windows.
+**Prebuilt binaries:** Download from [Releases](https://github.com/TysonLabs/lazyide/releases) for Linux, macOS, and Windows.
 
 ## Build & Run
 
