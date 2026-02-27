@@ -21,7 +21,7 @@ use crate::tab::{FoldRange, GitLineStatus};
 use crate::types::Focus;
 use crate::types::PendingAction;
 use crate::util::{relative_path, segment_has_selection};
-use helpers::{apply_indent_guides, clip_spans_by_columns};
+use helpers::{apply_indent_guides, apply_selection_to_spans, clip_spans_by_columns};
 use overlays::*;
 
 fn slice_chars(s: &str, start: usize, end: usize) -> String {
@@ -499,13 +499,65 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         } else {
             content_spans
         };
+        // Apply character-level selection highlighting to content spans
+        let (content_spans, sel_extends_to_eol) =
+            if segment_has_selection(row, seg_start, seg_end, selection) {
+                let Some(((mut sr, mut sc), (mut er, mut ec))) = selection else {
+                    unreachable!()
+                };
+                if (sr, sc) > (er, ec) {
+                    std::mem::swap(&mut sr, &mut er);
+                    std::mem::swap(&mut sc, &mut ec);
+                }
+                let sel_start_col = if row == sr { sc } else { 0 };
+                let sel_end_col = if row == er { ec } else { usize::MAX };
+                // Clamp to segment boundaries
+                let clamped_start = sel_start_col.max(seg_start).min(seg_end);
+                let clamped_end = sel_end_col.min(seg_end).max(seg_start);
+                // Convert original char positions to display columns (tab=4 cols)
+                let orig_chars: Vec<char> = lines_ref[row]
+                    .chars()
+                    .skip(seg_start)
+                    .take(seg_end - seg_start)
+                    .collect();
+                let char_to_display = |n: usize| -> usize {
+                    orig_chars.iter().take(n).fold(0, |acc, ch| {
+                        acc + if *ch == '\t' {
+                            4
+                        } else {
+                            unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0)
+                        }
+                    })
+                };
+                let display_start = char_to_display(clamped_start - seg_start);
+                let display_end = if sel_end_col >= seg_end {
+                    char_to_display(orig_chars.len())
+                } else {
+                    char_to_display(clamped_end - seg_start)
+                };
+                let effective_scroll = if !app.word_wrap { scroll_col } else { 0 };
+                let clipped_start = display_start.saturating_sub(effective_scroll);
+                let clipped_end = display_end.saturating_sub(effective_scroll);
+                let sel_style = Style::default().bg(theme.selection);
+                (
+                    apply_selection_to_spans(content_spans, clipped_start, clipped_end, sel_style),
+                    sel_end_col >= seg_end,
+                )
+            } else {
+                (content_spans, false)
+            };
         spans.extend(content_spans);
         // Pad line to full width so stale characters from previous frame are overwritten
         let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         if used < inner_w {
+            let pad_bg = if sel_extends_to_eol {
+                theme.selection
+            } else {
+                theme.bg
+            };
             spans.push(Span::styled(
                 " ".repeat(inner_w - used),
-                Style::default().bg(theme.bg),
+                Style::default().bg(pad_bg),
             ));
         }
         let hl = Line::from(spans);
@@ -523,11 +575,6 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             && (cursor_col < seg_end || (cursor_col == seg_end && seg_end == line_len_chars));
         let hl = if cursor_on_segment {
             hl.patch_style(Style::default().bg(theme.bg_alt))
-        } else {
-            hl
-        };
-        let hl = if segment_has_selection(row, seg_start, seg_end, selection) {
-            hl.patch_style(Style::default().bg(theme.selection))
         } else {
             hl
         };

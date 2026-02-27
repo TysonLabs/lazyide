@@ -259,6 +259,7 @@ impl App {
         let text = String::from_utf8_lossy(&bytes).to_string();
         let mut ta = TextArea::from(text_to_lines(&text));
         ta.set_cursor_line_style(Style::default().bg(self.active_theme().bg_alt));
+        ta.set_selection_style(Style::default().bg(self.active_theme().selection));
 
         let lang = syntax_lang_for_path(Some(path.as_path()));
         let (fold_ranges, bracket_depths) = compute_fold_ranges(ta.lines(), lang);

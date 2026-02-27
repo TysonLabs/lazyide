@@ -116,6 +116,7 @@ This detects missing tools (rust-analyzer, ripgrep) and offers to install them a
 - `Ctrl+C` copy / `Ctrl+X` cut / `Ctrl+V` paste
 - `Ctrl+/` toggle line comment (language-aware)
 - `Shift+Arrow` select text
+- `Ctrl+Shift+Arrow` select word-by-word
 - `Shift+Tab` dedent selected lines
 
 ### Tabs
