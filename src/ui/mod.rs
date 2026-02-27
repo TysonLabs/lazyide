@@ -573,7 +573,8 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         let cursor_on_segment = row == cursor_row
             && cursor_col >= seg_start
             && (cursor_col < seg_end || (cursor_col == seg_end && seg_end == line_len_chars));
-        let hl = if cursor_on_segment {
+        let has_selection = segment_has_selection(row, seg_start, seg_end, selection);
+        let hl = if cursor_on_segment && !has_selection {
             hl.patch_style(Style::default().bg(theme.bg_alt))
         } else {
             hl
