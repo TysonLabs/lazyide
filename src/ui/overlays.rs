@@ -458,6 +458,7 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
                 (&kb.display_for(KeyAction::SelectAll), "select all"),
                 (&kb.display_for(KeyAction::Copy), "copy"),
                 (&kb.display_for(KeyAction::Cut), "cut"),
+                (&kb.display_for(KeyAction::CutLine), "cut line"),
                 (&kb.display_for(KeyAction::Paste), "paste"),
                 (&kb.display_for(KeyAction::ToggleComment), "toggle comment"),
             ],

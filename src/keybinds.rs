@@ -47,6 +47,7 @@ pub(crate) enum KeyAction {
     SelectAll,
     Copy,
     Cut,
+    CutLine,
     Paste,
     ToggleComment,
     PageDown,
@@ -118,6 +119,7 @@ impl KeyAction {
             KeyAction::SelectAll => "Select All",
             KeyAction::Copy => "Copy",
             KeyAction::Cut => "Cut",
+            KeyAction::CutLine => "Cut Line",
             KeyAction::Paste => "Paste",
             KeyAction::ToggleComment => "Toggle Comment",
             KeyAction::PageDown => "Page Down",
@@ -163,6 +165,7 @@ impl KeyAction {
             KeyAction::SelectAll,
             KeyAction::Copy,
             KeyAction::Cut,
+            KeyAction::CutLine,
             KeyAction::Paste,
             KeyAction::ToggleComment,
             KeyAction::PageDown,
@@ -532,6 +535,7 @@ impl KeyBindings {
         bind(KeyAction::SelectAll, "ctrl+a");
         bind(KeyAction::Copy, "ctrl+c");
         bind(KeyAction::Cut, "ctrl+x");
+        bind(KeyAction::CutLine, "ctrl+k");
         bind(KeyAction::Paste, "ctrl+v");
         bind(KeyAction::PageDown, "pagedown");
         bind(KeyAction::PageUp, "pageup");

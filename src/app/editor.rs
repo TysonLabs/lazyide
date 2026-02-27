@@ -181,6 +181,63 @@ impl App {
         }
     }
 
+    pub(crate) fn cut_line(&mut self) {
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let (row, _col) = tab.editor.cursor();
+        let lines = tab.editor.lines();
+        if lines.is_empty() || row >= lines.len() {
+            self.set_status("No line to cut");
+            return;
+        }
+        let line_text = lines[row].to_string();
+        let total_lines = lines.len();
+        let is_last_line = row == total_lines - 1;
+
+        // Select the entire line including its trailing newline, then cut via
+        // TextArea so the deletion is recorded in the undo history.
+        let tab = &mut self.tabs[self.active_tab];
+        if is_last_line && row > 0 {
+            // Last line: select from end of previous line through end of this line
+            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                to_u16_saturating(row - 1),
+                u16::MAX,
+            ));
+            tab.editor.start_selection();
+            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                to_u16_saturating(row),
+                u16::MAX,
+            ));
+        } else if total_lines == 1 {
+            // Only one line: select all text on it
+            tab.editor
+                .move_cursor(tui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
+            tab.editor.start_selection();
+            tab.editor.move_cursor(tui_textarea::CursorMove::End);
+        } else {
+            // Select from start of this line to start of next line
+            tab.editor
+                .move_cursor(tui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
+            tab.editor.start_selection();
+            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                to_u16_saturating(row + 1),
+                0,
+            ));
+        }
+        tab.editor.cut();
+
+        // Overwrite yank buffer and system clipboard with the clean line text
+        if let Some(clipboard) = self.clipboard.as_mut() {
+            let _ = clipboard.set_text(line_text.clone());
+        }
+        self.tabs[self.active_tab]
+            .editor
+            .set_yank_text(line_text);
+        self.on_editor_content_changed();
+        self.set_status("Cut line");
+    }
+
     pub(crate) fn cut_selection_to_clipboard(&mut self) {
         let Some(tab) = self.active_tab() else {
             return;
@@ -729,5 +786,53 @@ impl App {
                 ));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn new_app(root: &std::path::Path) -> App {
+        App::new(root.to_path_buf()).expect("app should initialize")
+    }
+
+    #[test]
+    fn cut_line_removes_middle_line() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("test.txt");
+        fs::write(&file, "aaa\nbbb\nccc\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file).expect("open");
+        // Move cursor to line 1 (bbb)
+        app.tabs[app.active_tab]
+            .editor
+            .move_cursor(tui_textarea::CursorMove::Jump(1, 0));
+        app.cut_line();
+        let lines = app.tabs[app.active_tab].editor.lines().to_vec();
+        assert_eq!(lines, vec!["aaa", "ccc", ""]);
+    }
+
+    #[test]
+    fn cut_line_removes_last_line() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("test.txt");
+        fs::write(&file, "aaa\nbbb\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file).expect("open");
+        // Move cursor to last content line (index 2 is the empty trailing line)
+        app.tabs[app.active_tab]
+            .editor
+            .move_cursor(tui_textarea::CursorMove::Jump(2, 0));
+        app.cut_line();
+        let lines = app.tabs[app.active_tab].editor.lines().to_vec();
+        assert_eq!(lines, vec!["aaa", "bbb"]);
+        // Cursor should be clamped, not out of bounds
+        let (row, _) = app.tabs[app.active_tab].editor.cursor();
+        assert!(row < lines.len());
     }
 }
