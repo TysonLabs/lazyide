@@ -30,6 +30,8 @@ pub(crate) enum KeyAction {
     ToggleWordWrap,
     TreeExpandAll,
     TreeCollapseAll,
+    TreeExpandRecursive,
+    TreeCollapseRecursive,
     // Editor
     GoToDefinition,
     FoldToggle,
@@ -80,6 +82,8 @@ impl KeyAction {
                 | KeyAction::ToggleWordWrap
                 | KeyAction::TreeExpandAll
                 | KeyAction::TreeCollapseAll
+                | KeyAction::TreeExpandRecursive
+                | KeyAction::TreeCollapseRecursive
         )
     }
 
@@ -107,6 +111,8 @@ impl KeyAction {
             KeyAction::ToggleWordWrap => "Toggle Word Wrap",
             KeyAction::TreeExpandAll => "Expand All Folders",
             KeyAction::TreeCollapseAll => "Collapse All Folders",
+            KeyAction::TreeExpandRecursive => "Expand Dir Recursive",
+            KeyAction::TreeCollapseRecursive => "Collapse Dir Recursive",
             KeyAction::GoToDefinition => "Go to Definition",
             KeyAction::FoldToggle => "Toggle Fold",
             KeyAction::FoldAllToggle => "Toggle Fold All",
@@ -155,6 +161,8 @@ impl KeyAction {
             KeyAction::ToggleWordWrap,
             KeyAction::TreeExpandAll,
             KeyAction::TreeCollapseAll,
+            KeyAction::TreeExpandRecursive,
+            KeyAction::TreeCollapseRecursive,
             KeyAction::GoToDefinition,
             KeyAction::FoldToggle,
             KeyAction::FoldAllToggle,
@@ -520,6 +528,8 @@ impl KeyBindings {
         bind(KeyAction::ToggleWordWrap, "f6");
         bind(KeyAction::TreeExpandAll, "ctrl+shift+e");
         bind(KeyAction::TreeCollapseAll, "ctrl+shift+c");
+        bind(KeyAction::TreeExpandRecursive, "shift+right");
+        bind(KeyAction::TreeCollapseRecursive, "shift+left");
 
         // Editor
         bind(KeyAction::GoToDefinition, "ctrl+d");

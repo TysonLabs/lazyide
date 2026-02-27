@@ -63,6 +63,14 @@ Core model remains the same:
   - `Ctrl+Shift+C` — collapse all folders globally
   - `Delete` — delete selected item
 
+## Editor Features
+
+- **Gutter line selection** — click the gutter to select a line, drag to select multiple lines
+- **Cut line** — Ctrl+K cuts the entire current line
+- **Auto-pair insertion** — automatically pairs `()`, `[]`, `{}`, `""`, `''`
+- **Bracketed paste** — multi-line paste without auto-pair doubling
+- **Inline ghost completion** — LSP ghost text shown inline, Tab to accept
+
 ## Themes
 
 `themes/*.json` — Each file defines background, foreground, accent, selection, border, and UI element colors. Parsed via `ThemeFile` struct with serde. Fallback to built-in dark theme if no files found.

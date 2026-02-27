@@ -491,8 +491,8 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
         ),
         help_keybind_line(
             &[
-                ("Shift+Right", "expand recursive"),
-                ("Shift+Left", "collapse recursive"),
+                (&kb.display_for(KeyAction::TreeExpandRecursive), "expand recursive"),
+                (&kb.display_for(KeyAction::TreeCollapseRecursive), "collapse recursive"),
             ],
             key_s,
             desc_s,

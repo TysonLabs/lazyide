@@ -305,12 +305,6 @@ impl App {
             (KeyModifiers::NONE, KeyCode::Left) | (KeyModifiers::NONE, KeyCode::Char('h')) => {
                 self.tree_collapse_or_parent();
             }
-            (KeyModifiers::SHIFT, KeyCode::Right) => {
-                self.tree_expand_recursive()?;
-            }
-            (KeyModifiers::SHIFT, KeyCode::Left) => {
-                self.tree_collapse_recursive()?;
-            }
             _ => {}
         }
         Ok(())
@@ -510,6 +504,12 @@ impl App {
             KeyAction::TreeCollapseAll => {
                 self.tree_collapse_all()?;
                 self.set_status("Collapsed all folders");
+            }
+            KeyAction::TreeExpandRecursive => {
+                self.tree_expand_recursive()?;
+            }
+            KeyAction::TreeCollapseRecursive => {
+                self.tree_collapse_recursive()?;
             }
             // Editor
             KeyAction::GoToDefinition => {
