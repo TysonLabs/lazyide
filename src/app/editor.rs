@@ -712,6 +712,39 @@ impl App {
         let col = col.min(seg_end).min(max_col);
         Some((row, col))
     }
+    pub(crate) fn select_line(&mut self, row: usize) {
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let lines = tab.editor.lines();
+        let total = lines.len();
+        if total == 0 || row >= total {
+            return;
+        }
+        let line_len = lines[row].chars().count();
+        // Start selection from end and move cursor to start, so the cursor
+        // ends up at the beginning of the line rather than the next line.
+        if let Some(tab) = self.active_tab_mut() {
+            if row + 1 < total {
+                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                    to_u16_saturating(row + 1),
+                    0,
+                ));
+            } else {
+                tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                    to_u16_saturating(row),
+                    to_u16_saturating(line_len),
+                ));
+            }
+            tab.editor.start_selection();
+            tab.editor.move_cursor(tui_textarea::CursorMove::Jump(
+                to_u16_saturating(row),
+                0,
+            ));
+        }
+        self.sync_editor_scroll_guess();
+    }
+
     pub(crate) fn extend_mouse_selection(&mut self, x: u16, y: u16) {
         if let (Some((anchor_row, anchor_col)), Some((row, col))) =
             (self.editor_drag_anchor, self.editor_pos_from_mouse(x, y))
@@ -728,5 +761,66 @@ impl App {
                 ));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn new_app(root: &std::path::Path) -> App {
+        App::new(root.to_path_buf()).expect("app should initialize")
+    }
+
+    #[test]
+    fn click_line_number_selects_line() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("test.txt");
+        fs::write(&file, "line 0\nline 1\nline 2\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file).expect("open");
+
+        app.select_line(1);
+
+        let tab = app.active_tab().expect("tab");
+        let sel = tab.editor.selection_range().expect("should have selection");
+        assert_eq!(sel, ((1, 0), (2, 0)));
+        // Cursor should be at the start of the selected line
+        assert_eq!(tab.editor.cursor(), (1, 0));
+    }
+
+    #[test]
+    fn click_line_number_selects_last_line() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("test.txt");
+        fs::write(&file, "line 0\nline 1\nlast line").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file).expect("open");
+
+        app.select_line(2);
+
+        let tab = app.active_tab().expect("tab");
+        let sel = tab.editor.selection_range().expect("should have selection");
+        assert_eq!(sel, ((2, 0), (2, 9)));
+    }
+
+    #[test]
+    fn click_line_number_selects_first_line() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("test.txt");
+        fs::write(&file, "first\nsecond\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file).expect("open");
+
+        app.select_line(0);
+
+        let tab = app.active_tab().expect("tab");
+        let sel = tab.editor.selection_range().expect("should have selection");
+        assert_eq!(sel, ((0, 0), (1, 0)));
     }
 }

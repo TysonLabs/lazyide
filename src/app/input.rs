@@ -291,10 +291,21 @@ impl App {
                             .row
                             .saturating_sub(self.editor_rect.y.saturating_add(1))
                             as usize;
-                        if let Some(tab) = self.active_tab() {
-                            let visible_idx = tab.editor_scroll_row + inner_y;
-                            if let Some(&row) = tab.visible_rows_map.get(visible_idx) {
-                                self.toggle_fold_at_row(row);
+                        if inner_x < 6 {
+                            // Line number area → select full line
+                            if let Some(tab) = self.active_tab() {
+                                let visible_idx = tab.editor_scroll_row + inner_y;
+                                if let Some(&row) = tab.visible_rows_map.get(visible_idx) {
+                                    self.select_line(row);
+                                }
+                            }
+                        } else {
+                            // Fold/marker area → toggle fold
+                            if let Some(tab) = self.active_tab() {
+                                let visible_idx = tab.editor_scroll_row + inner_y;
+                                if let Some(&row) = tab.visible_rows_map.get(visible_idx) {
+                                    self.toggle_fold_at_row(row);
+                                }
                             }
                         }
                         return Ok(());
