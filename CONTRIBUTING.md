@@ -80,7 +80,7 @@ Add syntax highlighting and bracket pair colors for a polished experience:
 ### Tips
 
 - Look at existing themes in `themes/` for reference
-- Extra color fields (like `red`, `green`, `blue`, `orange`, etc.) are ignored but welcome for future use
+- `red`, `green`, and `yellow` (or a `terminal` block with the same keys) color the git gutter markers and tree file status; other extra color fields (`blue`, `orange`, etc.) are ignored but welcome for future use
 - All hex color values must be 6-digit with `#` prefix (e.g. `#ff00aa`)
 
 ## Bug Reports
