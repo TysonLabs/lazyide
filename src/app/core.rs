@@ -1081,7 +1081,7 @@ mod tests {
         app.open_file(file).expect("open");
         app.word_wrap = true;
         // Simulate a narrow editor (wrap_width ~ 10 chars)
-        app.editor_rect = Rect::new(0, 0, 22, 20); // 22 - 2 border - 10 gutter = 10
+        app.editor_rect = Rect::new(0, 0, 22, 20); // 22 - 2 border - 2 padding - 11 gutter = 7 content columns
         app.rebuild_visible_rows();
         let tab = app.active_tab().expect("tab");
         // The long line should produce multiple segments (source row 0 appears more than once)
