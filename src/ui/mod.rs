@@ -10,7 +10,9 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap,
+};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
@@ -42,17 +44,16 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         .split(size);
     let (tree_area, editor_area) = if app.files_view_open {
         app.clamp_files_pane_width(vertical[1].width);
-        let divider_w = 1;
         let main = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(app.files_pane_width),
-                Constraint::Length(divider_w),
                 Constraint::Min(App::MIN_EDITOR_PANE_WIDTH),
             ])
             .split(vertical[1]);
-        app.divider_rect = main[1];
-        (Some(main[0]), main[2])
+        // The divider is the editor's left border column, shared with the tree.
+        app.divider_rect = Rect::new(main[1].x, main[1].y, 1, main[1].height);
+        (Some(main[0]), main[1])
     } else {
         app.divider_rect = Rect::default();
         (None, vertical[1])
@@ -95,6 +96,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.border)),
         );
     frame.render_widget(top, vertical[0]);
@@ -151,7 +153,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             .block(
                 Block::default()
                     .title("[1]-Files")
-                    .borders(Borders::ALL)
+                    .borders(Borders::TOP | Borders::LEFT | Borders::BOTTOM)
+                    .border_type(BorderType::Rounded)
+                    .padding(Padding::horizontal(1))
                     .border_style(Style::default().fg(left_border))
                     .style(Style::default().bg(theme.bg_alt).fg(theme.fg)),
             );
@@ -172,11 +176,6 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                 Span::styled("[-]", Style::default().fg(theme.accent)),
             ]));
             frame.render_widget(btns, Rect::new(btn_x, btn_y, btn_width, 1));
-        }
-        if app.files_view_open && app.divider_rect.width > 0 {
-            let divider =
-                Paragraph::new("│").style(Style::default().fg(theme.border).bg(theme.bg_alt));
-            frame.render_widget(divider, app.divider_rect);
         }
     }
 
@@ -217,15 +216,33 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     let editor_block = Block::default()
         .title(tab_title)
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(right_border))
         .style(Style::default().bg(theme.bg_alt).fg(theme.fg));
     frame.render_widget(editor_block, editor_area);
-    let inner = Rect::new(
-        editor_area.x.saturating_add(1),
-        editor_area.y.saturating_add(1),
-        editor_area.width.saturating_sub(2),
-        editor_area.height.saturating_sub(2),
-    );
+    if app.files_view_open && app.divider_rect.width > 0 {
+        // Redraw the shared border column as a proper split: T-junctions at the
+        // top and bottom, colored for whichever pane has focus.
+        let color = if app.focus == Focus::Tree {
+            theme.accent
+        } else {
+            right_border
+        };
+        let d = app.divider_rect;
+        let style = Style::default().fg(color).bg(theme.bg_alt);
+        let buf = frame.buffer_mut();
+        for y in d.y..d.bottom() {
+            let sym = if y == d.y {
+                "┬"
+            } else if y + 1 == d.bottom() {
+                "┴"
+            } else {
+                "│"
+            };
+            buf[(d.x, y)].set_symbol(sym).set_style(style);
+        }
+    }
+    let inner = app.editor_inner_rect();
 
     // Compute tab_rects for click detection (position within the title bar)
     {
@@ -701,6 +718,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     .block(
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme.border)),
     );
     frame.render_widget(status, vertical[2]);

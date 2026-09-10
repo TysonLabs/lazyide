@@ -195,7 +195,8 @@ impl App {
                         let desired = mouse.column.saturating_sub(self.tree_rect.x);
                         self.files_pane_width = desired.max(Self::MIN_FILES_PANE_WIDTH);
                         self.clamp_files_pane_width(
-                            self.editor_rect.width + self.tree_rect.width + self.divider_rect.width,
+                            // The divider column lives inside editor_rect now.
+                            self.editor_rect.width + self.tree_rect.width,
                         );
                         return Ok(());
                     }
@@ -297,9 +298,7 @@ impl App {
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     self.focus = Focus::Editor;
-                    let inner_x = mouse
-                        .column
-                        .saturating_sub(self.editor_rect.x.saturating_add(1));
+                    let inner_x = mouse.column.saturating_sub(self.editor_inner_rect().x);
                     if inner_x < Self::EDITOR_GUTTER_WIDTH {
                         if inner_x < 5 {
                             // Line number area → select full line

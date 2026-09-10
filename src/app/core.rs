@@ -30,6 +30,8 @@ use crate::util::{
 impl App {
     pub(crate) const INLINE_GHOST_MIN_PREFIX: usize = 3;
     pub(crate) const EDITOR_GUTTER_WIDTH: u16 = 11;
+    /// Horizontal padding inside the editor border, each side.
+    pub(crate) const EDITOR_PAD_X: u16 = 1;
     pub(crate) const MIN_FILES_PANE_WIDTH: u16 = 18;
     pub(crate) const MIN_EDITOR_PANE_WIDTH: u16 = 28;
     pub(crate) const FS_REFRESH_DEBOUNCE_MS: u64 = 120;
@@ -726,8 +728,19 @@ impl App {
         }
     }
 
+    /// Content area of the editor: inside the border and horizontal padding.
+    pub(crate) fn editor_inner_rect(&self) -> Rect {
+        let r = self.editor_rect;
+        Rect::new(
+            r.x.saturating_add(1 + Self::EDITOR_PAD_X),
+            r.y.saturating_add(1),
+            r.width.saturating_sub(2 + 2 * Self::EDITOR_PAD_X),
+            r.height.saturating_sub(2),
+        )
+    }
+
     fn editor_wrap_width_chars(&self) -> usize {
-        let inner_width = self.editor_rect.width.saturating_sub(2);
+        let inner_width = self.editor_inner_rect().width;
         let content_width = inner_width.saturating_sub(Self::EDITOR_GUTTER_WIDTH);
         if content_width == 0 {
             usize::MAX
