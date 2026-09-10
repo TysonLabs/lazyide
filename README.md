@@ -104,7 +104,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 | `Ctrl+B` | Toggle file tree |
 | `Ctrl+F` | Find in file |
 | `Ctrl+H` | Find and replace |
-| `Ctrl+Shift+F` | Search project (ripgrep) |
+| `Ctrl+Shift+F` / `Alt+F` | Search project (ripgrep) |
 | `F5` | Git diff of current file |
 | `Ctrl+N` | New file |
 | `Ctrl+R` | Refresh tree |
