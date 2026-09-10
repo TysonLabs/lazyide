@@ -76,7 +76,9 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 ### Git
 - **Gutter markers** — added `+`, modified `~`, deleted `-` per line via `git diff`
 - **File status** — tree colors files by status (modified, added, untracked) with directory propagation
-- **Branch display** — branch name and change summary in the top bar
+- **Branch display** — branch name and change summary in the status bar
+- **Diff view** — side-by-side working tree vs HEAD for the current file, hunk navigation, jump to hunk
+- **Change navigation** — `Alt+N` / `Alt+P` jump to the next / previous changed region
 
 ### Interface
 - **32 themes** — dark and light, with live preview browser
@@ -103,6 +105,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 | `Ctrl+F` | Find in file |
 | `Ctrl+H` | Find and replace |
 | `Ctrl+Shift+F` | Search project (ripgrep) |
+| `Ctrl+Shift+G` / `F5` | Git diff of current file |
 | `Ctrl+N` | New file |
 | `Ctrl+R` | Refresh tree |
 | `Alt+Z` | Toggle word wrap |
@@ -128,6 +131,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 | `Ctrl+A` | Select all |
 | `Shift+Alt+Down` / `Up` | Duplicate line |
 | `F3` / `Shift+F3` | Find next / previous |
+| `Alt+N` / `Alt+P` | Next / previous git change |
 | `PageUp` / `PageDown` | Scroll page |
 | `Ctrl+Home` / `Ctrl+End` | Start / end of file |
 
