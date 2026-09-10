@@ -127,8 +127,8 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                         .add_modifier(Modifier::BOLD)
                 } else {
                     let fg = match app.git_file_statuses.get(&item.path) {
-                        Some(crate::tab::GitFileStatus::Modified) => Color::Yellow,
-                        Some(crate::tab::GitFileStatus::Added) => Color::Green,
+                        Some(crate::tab::GitFileStatus::Modified) => theme.git_modified,
+                        Some(crate::tab::GitFileStatus::Added) => theme.git_added,
                         Some(crate::tab::GitFileStatus::Untracked) => theme.fg_muted,
                         None => theme.fg,
                     };
@@ -427,9 +427,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         }
         let mut spans = Vec::new();
         let line_num = if is_first_segment {
-            format!("{:>5} ", row + 1)
+            format!("{:>5}", row + 1)
         } else {
-            "      ".to_string()
+            "     ".to_string()
         };
         let line_num_style = if row == cursor_row {
             Style::default().fg(theme.accent)
@@ -484,18 +484,20 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         };
         match git_status {
             GitLineStatus::Added => {
-                spans.push(Span::styled("+", Style::default().fg(Color::Green)));
+                spans.push(Span::styled("+", Style::default().fg(theme.git_added)));
             }
             GitLineStatus::Modified => {
-                spans.push(Span::styled("~", Style::default().fg(Color::Yellow)));
+                spans.push(Span::styled("~", Style::default().fg(theme.git_modified)));
             }
             GitLineStatus::Deleted => {
-                spans.push(Span::styled("-", Style::default().fg(Color::Red)));
+                spans.push(Span::styled("-", Style::default().fg(theme.git_deleted)));
             }
             GitLineStatus::None => {
                 spans.push(Span::raw(" "));
             }
         }
+        // Gutter separator, then one space before the code.
+        spans.push(Span::styled("│", Style::default().fg(theme.border)));
         spans.push(Span::raw(" "));
         let segment_text = slice_chars(&lines_ref[row], seg_start, seg_end).replace('\t', "    ");
         let bracket_colors = [theme.bracket_1, theme.bracket_2, theme.bracket_3];

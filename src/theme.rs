@@ -124,6 +124,9 @@ pub(crate) struct Theme {
     pub(crate) bracket_1: Color,
     pub(crate) bracket_2: Color,
     pub(crate) bracket_3: Color,
+    pub(crate) git_added: Color,
+    pub(crate) git_modified: Color,
+    pub(crate) git_deleted: Color,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +137,8 @@ pub(crate) struct ThemeFile {
     pub(crate) colors: ThemeColors,
     #[serde(default)]
     pub(crate) syntax: Option<ThemeSyntaxColors>,
+    #[serde(default)]
+    pub(crate) terminal: Option<ThemeTerminalColors>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,6 +160,21 @@ pub(crate) struct ThemeColors {
     pub(crate) purple: Option<String>,
     #[serde(default)]
     pub(crate) cyan: Option<String>,
+    #[serde(default)]
+    pub(crate) red: Option<String>,
+    #[serde(default)]
+    pub(crate) green: Option<String>,
+}
+
+/// Optional ANSI-style palette; used as a fallback source for git colors.
+#[derive(Debug, Deserialize, Default)]
+pub(crate) struct ThemeTerminalColors {
+    #[serde(default)]
+    pub(crate) red: Option<String>,
+    #[serde(default)]
+    pub(crate) green: Option<String>,
+    #[serde(default)]
+    pub(crate) yellow: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -186,8 +206,37 @@ pub(crate) fn color_from_hex(input: &str, fallback: Color) -> Color {
     fallback
 }
 
+/// First hex value that parses wins; otherwise `fallback`.
+fn first_color(candidates: [Option<&String>; 2], fallback: Color) -> Color {
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|c| color_from_hex(c, fallback))
+        .find(|c| *c != fallback)
+        .unwrap_or(fallback)
+}
+
 pub(crate) fn theme_from_file(tf: ThemeFile) -> Theme {
     let syn = tf.syntax.as_ref();
+    let term = tf.terminal.as_ref();
+    let git_added = first_color(
+        [
+            tf.colors.green.as_ref(),
+            term.and_then(|t| t.green.as_ref()),
+        ],
+        Color::Green,
+    );
+    let git_modified = first_color(
+        [
+            tf.colors.yellow.as_ref(),
+            term.and_then(|t| t.yellow.as_ref()),
+        ],
+        Color::Yellow,
+    );
+    let git_deleted = first_color(
+        [tf.colors.red.as_ref(), term.and_then(|t| t.red.as_ref())],
+        Color::Red,
+    );
     let border_color = color_from_hex(&tf.colors.border, make_color(127, 122, 88));
     let fg_muted = color_from_hex(&tf.colors.foreground_muted, make_color(100, 100, 120));
     Theme {
@@ -251,6 +300,9 @@ pub(crate) fn theme_from_file(tf: ThemeFile) -> Theme {
             .map_or(make_color(0, 175, 215), |c| {
                 color_from_hex(c, make_color(0, 175, 215))
             }),
+        git_added,
+        git_modified,
+        git_deleted,
     }
 }
 
@@ -402,6 +454,27 @@ mod theme_and_persistence_tests {
         assert_eq!(theme.syntax_number, Color::Rgb(255, 158, 100));
         assert_eq!(theme.syntax_tag, Color::Rgb(122, 162, 247));
         assert_eq!(theme.syntax_attribute, Color::Rgb(115, 218, 202));
+    }
+
+    #[test]
+    fn test_git_colors_prefer_colors_then_terminal_then_ansi() {
+        let base = r##""name":"G","type":"dark","colors":{"background":"#000000","backgroundAlt":"#000000","foreground":"#ffffff","foregroundMuted":"#888888","border":"#444444","accent":"#00ff00","selection":"#333333""##;
+        // colors.* wins over terminal.*
+        let json = format!(
+            r##"{{{base},"green":"#11aa11","yellow":"#aaaa11"}},"terminal":{{"green":"#22bb22","red":"#bb2222"}}}}"##
+        );
+        let theme = theme_from_file(serde_json::from_str(&json).unwrap());
+        assert_eq!(theme.git_added, Color::Rgb(0x11, 0xaa, 0x11));
+        assert_eq!(theme.git_modified, Color::Rgb(0xaa, 0xaa, 0x11));
+        // red only in terminal
+        assert_eq!(theme.git_deleted, Color::Rgb(0xbb, 0x22, 0x22));
+
+        // neither section → ANSI defaults (previous hardcoded behavior)
+        let json = format!("{{{base}}}}}");
+        let theme = theme_from_file(serde_json::from_str(&json).unwrap());
+        assert_eq!(theme.git_added, Color::Green);
+        assert_eq!(theme.git_modified, Color::Yellow);
+        assert_eq!(theme.git_deleted, Color::Red);
     }
 
     #[test]

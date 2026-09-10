@@ -301,7 +301,7 @@ impl App {
                         .column
                         .saturating_sub(self.editor_rect.x.saturating_add(1));
                     if inner_x < Self::EDITOR_GUTTER_WIDTH {
-                        if inner_x < 6 {
+                        if inner_x < 5 {
                             // Line number area → select full line
                             if let Some(row) = self.gutter_row_from_mouse(mouse.row) {
                                 self.select_line(row);
