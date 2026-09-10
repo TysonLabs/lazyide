@@ -240,11 +240,10 @@ impl App {
             let _ = self.rebuild_tree();
             return;
         }
-        if let Some(parent) = item.path.parent() {
-            if let Some(idx) = self.tree.iter().position(|i| i.path == parent) {
+        if let Some(parent) = item.path.parent()
+            && let Some(idx) = self.tree.iter().position(|i| i.path == parent) {
                 self.selected = idx;
             }
-        }
     }
 
     pub(crate) fn tree_expand_recursive(&mut self) -> io::Result<()> {

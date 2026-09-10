@@ -255,11 +255,10 @@ impl App {
             // Dispatch async git refresh if not already in flight
             if !self.git_refresh_in_flight {
                 // Join the previous thread (prevents handle accumulation)
-                if let Some(handle) = self.git_thread_handle.take() {
-                    if handle.join().is_err() {
+                if let Some(handle) = self.git_thread_handle.take()
+                    && handle.join().is_err() {
                         self.set_status("Git refresh thread panicked");
                     }
-                }
                 let root = self.root.clone();
                 let tab_paths: Vec<(PathBuf, usize)> = self
                     .tabs
@@ -557,14 +556,13 @@ impl App {
     }
 
     pub(crate) fn update_status_for_cursor(&mut self) {
-        if self.focus == Focus::Editor {
-            if let Some(tab) = self.active_tab() {
+        if self.focus == Focus::Editor
+            && let Some(tab) = self.active_tab() {
                 let cursor_row = tab.editor.cursor().0;
                 if let Some(diag) = tab.diagnostics.iter().find(|d| d.line == cursor_row + 1) {
                     self.status = format!("[{}] {}", diag.severity, diag.message);
                 }
             }
-        }
     }
 
     pub(crate) fn poll_autosave(&mut self) -> io::Result<()> {
@@ -595,12 +593,11 @@ impl App {
             return;
         };
         let current = self.tabs[self.active_tab].editor.lines().join("\n");
-        if recovered != current {
-            if let Some(tab) = self.active_tab_mut() {
+        if recovered != current
+            && let Some(tab) = self.active_tab_mut() {
                 tab.recovery_prompt_open = true;
                 tab.recovery_text = Some(recovered);
             }
-        }
     }
 
     pub(crate) fn clear_autosave_for_open_file(&mut self) {
@@ -623,12 +620,11 @@ impl App {
             .open_disk_snapshot
             .clone()
             .unwrap_or_default();
-        if disk != snapshot && disk != current {
-            if let Some(tab) = self.active_tab_mut() {
+        if disk != snapshot && disk != current
+            && let Some(tab) = self.active_tab_mut() {
                 tab.conflict_prompt_open = true;
                 tab.conflict_disk_text = Some(disk);
             }
-        }
         Ok(())
     }
     pub(crate) fn clamp_files_pane_width(&mut self, total_width: u16) {
@@ -682,12 +678,12 @@ impl App {
             .reserve(num_lines.saturating_sub(hidden.len()));
         tab.visible_row_ends
             .reserve(num_lines.saturating_sub(hidden.len()));
-        for row in 0..num_lines {
+        for (row, line) in lines.iter().enumerate().take(num_lines) {
             if !hidden.contains(&row) {
                 let segments = if word_wrap {
-                    wrap_segments_for_line(&lines[row], wrap_width)
+                    wrap_segments_for_line(line, wrap_width)
                 } else {
-                    vec![(0, lines[row].chars().count())]
+                    vec![(0, line.chars().count())]
                 };
                 for (start, end) in segments {
                     tab.visible_rows_map.push(row);
@@ -717,12 +713,11 @@ impl App {
     /// Called from the main loop to flush any pending wrap rebuild after a
     /// resize has settled.
     pub(crate) fn poll_wrap_rebuild(&mut self) {
-        if let Some(deadline) = self.wrap_rebuild_deadline {
-            if Instant::now() >= deadline {
+        if let Some(deadline) = self.wrap_rebuild_deadline
+            && Instant::now() >= deadline {
                 self.wrap_rebuild_deadline = None;
                 self.rebuild_all_visible_rows();
             }
-        }
     }
 
     fn editor_wrap_width_chars(&self) -> usize {
@@ -831,15 +826,14 @@ impl App {
         let mut unfolded = false;
         let starts: Vec<usize> = tab.folded_starts.iter().copied().collect();
         for start in starts {
-            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start) {
-                if fr.start_line == cursor_row
-                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line)
+            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start)
+                && (fr.start_line == cursor_row
+                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line))
                 {
                     self.tabs[self.active_tab].folded_starts.remove(&start);
                     unfolded = true;
                     break;
                 }
-            }
         }
         if unfolded {
             self.rebuild_visible_rows();
@@ -887,14 +881,13 @@ impl App {
         // Check if cursor is on/in a folded block
         let mut is_folded = false;
         for &start in &tab.folded_starts {
-            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start) {
-                if fr.start_line == cursor_row
-                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line)
+            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start)
+                && (fr.start_line == cursor_row
+                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line))
                 {
                     is_folded = true;
                     break;
                 }
-            }
         }
         if is_folded {
             self.unfold_current_block();

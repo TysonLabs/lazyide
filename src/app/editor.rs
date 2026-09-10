@@ -283,16 +283,14 @@ impl App {
 
     pub(crate) fn paste_from_clipboard(&mut self) {
         let mut from_system = false;
-        if let Some(clipboard) = self.clipboard.as_mut() {
-            if let Ok(text) = clipboard.get_text() {
-                if !text.is_empty() {
+        if let Some(clipboard) = self.clipboard.as_mut()
+            && let Ok(text) = clipboard.get_text()
+                && !text.is_empty() {
                     if let Some(tab) = self.active_tab_mut() {
                         tab.editor.set_yank_text(text);
                     }
                     from_system = true;
                 }
-            }
-        }
         if self.active_tab_mut().is_some_and(|t| t.editor.paste()) {
             self.on_editor_content_changed();
             if from_system {
@@ -581,20 +579,18 @@ impl App {
             .unwrap_or_default();
         let chars: Vec<char> = line.chars().collect();
         let mut cursor_display_col = 0usize;
-        for i in 0..cursor_col.min(chars.len()) {
-            cursor_display_col +=
-                unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(0);
+        for &ch in &chars[..cursor_col.min(chars.len())] {
+            cursor_display_col += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
         }
         let scroll_col = tab.editor_scroll_col;
         if cursor_display_col < scroll_col {
             if let Some(tab) = self.active_tab_mut() {
                 tab.editor_scroll_col = cursor_display_col;
             }
-        } else if cursor_display_col >= scroll_col + content_width {
-            if let Some(tab) = self.active_tab_mut() {
+        } else if cursor_display_col >= scroll_col + content_width
+            && let Some(tab) = self.active_tab_mut() {
                 tab.editor_scroll_col = cursor_display_col.saturating_sub(content_width.saturating_sub(1));
             }
-        }
     }
 
     /// After a scroll event, ensure the cursor stays within the visible
@@ -777,8 +773,8 @@ impl App {
         };
         let mut col = seg_start;
         let mut width_acc = 0usize;
-        for i in seg_start..seg_end.min(chars.len()) {
-            let cw = unicode_width::UnicodeWidthChar::width(chars[i]).unwrap_or(0);
+        for (i, &ch) in chars.iter().enumerate().take(seg_end.min(chars.len())).skip(seg_start) {
+            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
             if width_acc + cw > effective_text_x {
                 break;
             }
@@ -869,8 +865,7 @@ impl App {
     pub(crate) fn extend_mouse_selection(&mut self, x: u16, y: u16) {
         if let (Some((anchor_row, anchor_col)), Some((row, col))) =
             (self.editor_drag_anchor, self.editor_pos_from_mouse(x, y))
-        {
-            if let Some(tab) = self.active_tab_mut() {
+            && let Some(tab) = self.active_tab_mut() {
                 tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(anchor_row),
                     to_u16_saturating(anchor_col),
@@ -881,7 +876,6 @@ impl App {
                     to_u16_saturating(col),
                 ));
             }
-        }
     }
 }
 

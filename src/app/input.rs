@@ -405,8 +405,8 @@ impl App {
                     return Ok(());
                 }
                 MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
-                    if !self.word_wrap {
-                        if let Some(tab) = self.active_tab_mut() {
+                    if !self.word_wrap
+                        && let Some(tab) = self.active_tab_mut() {
                             match mouse.kind {
                                 MouseEventKind::ScrollLeft => {
                                     tab.editor_scroll_col = tab
@@ -421,7 +421,6 @@ impl App {
                                 _ => {}
                             }
                         }
-                    }
                     return Ok(());
                 }
                 _ => return Ok(()),

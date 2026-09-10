@@ -644,8 +644,8 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                     .map(|l| l.replace('\t', "    ").chars().collect())
                     .unwrap_or_default();
                 let mut dw = 0usize;
-                for i in 0..cursor_col.min(line_chars.len()) {
-                    dw += unicode_width::UnicodeWidthChar::width(line_chars[i]).unwrap_or(0);
+                for &ch in &line_chars[..cursor_col.min(line_chars.len())] {
+                    dw += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
                 }
                 dw.saturating_sub(scroll_col)
             } else {
@@ -655,9 +655,8 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             // If cursor would be off-screen horizontally (scrolled past), skip rendering
             if !app.word_wrap && cursor_x > max_x {
                 // cursor off-screen — don't render
-            } else
-            if let Some(ghost) = app.completion.ghost.as_ref() {
-                if !ghost.is_empty()
+            } else if let Some(ghost) = app.completion.ghost.as_ref()
+                && !ghost.is_empty()
                     && (cursor_x as u16 + App::EDITOR_GUTTER_WIDTH) < inner.width.saturating_sub(1)
                 {
                     let ghost_area = Rect::new(
@@ -676,7 +675,6 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                         Span::styled(ghost.clone(), Style::default().fg(theme.fg_muted));
                     frame.render_widget(Paragraph::new(Line::from(vec![ghost_span])), ghost_area);
                 }
-            }
             frame.set_cursor_position((
                 inner
                     .x

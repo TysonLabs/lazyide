@@ -257,14 +257,13 @@ fn parse_unified_diff_into(diff: &str, result: &mut [GitLineStatus]) {
             if let Some(plus_part) = line.split('+').nth(1) {
                 let nums: &str = plus_part.split_whitespace().next().unwrap_or("");
                 let mut parts = nums.split(',');
-                if let Some(start_str) = parts.next() {
-                    if let Ok(start) = start_str.parse::<usize>() {
+                if let Some(start_str) = parts.next()
+                    && let Ok(start) = start_str.parse::<usize>() {
                         new_line = start;
                         let _count: usize = parts.next().and_then(|n| n.parse().ok()).unwrap_or(1);
                         in_hunk = true;
                         pending_deletes = 0;
                     }
-                }
             }
             continue;
         }
@@ -498,16 +497,14 @@ pub(crate) fn compute_fold_ranges(
                     depth = depth.saturating_add(1);
                 } else if ch == '}' || ch == ')' || ch == ']' {
                     depth = depth.saturating_sub(1);
-                    if ch == '}' {
-                        if let Some((_, start)) = stack.pop() {
-                            if row > start {
+                    if ch == '}'
+                        && let Some((_, start)) = stack.pop()
+                            && row > start {
                                 ranges.push(FoldRange {
                                     start_line: start,
                                     end_line: row,
                                 });
                             }
-                        }
-                    }
                 }
             } else if ch == '\\' {
                 i += 2;
@@ -656,8 +653,8 @@ pub(crate) fn wrap_segments_for_line(line: &str, wrap_width: usize) -> Vec<(usiz
         let start_w = cum_width[start];
         // Find the furthest char index whose display width fits within wrap_width.
         let mut hard_end = start;
-        for i in (start + 1)..=len {
-            if cum_width[i] - start_w > wrap_width {
+        for (i, &w) in cum_width.iter().enumerate().skip(start + 1) {
+            if w - start_w > wrap_width {
                 break;
             }
             hard_end = i;
