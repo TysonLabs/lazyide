@@ -743,6 +743,25 @@ pub(crate) fn collect_all_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Resolve `.` and `..` components without touching the filesystem, so the
+/// result stays comparable with other non-canonical paths (e.g. the project root).
+pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                // Above an absolute root, `..` is a no-op; for relative paths keep it.
+                if !out.pop() && !out.has_root() {
+                    out.push(comp);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 pub(crate) fn relative_path(root: &Path, path: &Path) -> PathBuf {
     path.strip_prefix(root).unwrap_or(path).to_path_buf()
 }
@@ -750,6 +769,28 @@ pub(crate) fn relative_path(root: &Path, path: &Path) -> PathBuf {
 pub(crate) fn to_u16_saturating(v: usize) -> u16 {
     u16::try_from(v).unwrap_or(u16::MAX)
 }
+#[cfg(test)]
+mod path_tests {
+    use super::normalize_lexically;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn normalize_lexically_resolves_dots_without_fs() {
+        assert_eq!(
+            normalize_lexically(Path::new("/var/proj/./src/../lib")),
+            PathBuf::from("/var/proj/lib")
+        );
+        assert_eq!(
+            normalize_lexically(Path::new("/a/b/../../..")),
+            PathBuf::from("/")
+        );
+        assert_eq!(
+            normalize_lexically(Path::new("rel/./x/..")),
+            PathBuf::from("rel")
+        );
+    }
+}
+
 #[cfg(test)]
 mod git_parsing_tests {
     use super::*;

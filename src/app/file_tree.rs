@@ -5,7 +5,9 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::tree_item::TreeItem;
 use crate::types::{ContextAction, PendingAction, PromptMode, PromptState};
-use crate::util::{collect_all_files, fuzzy_score, relative_path, to_u16_saturating};
+use crate::util::{
+    collect_all_files, fuzzy_score, normalize_lexically, relative_path, to_u16_saturating,
+};
 
 impl App {
     fn sanitize_entry_name<'a>(&self, value: &'a str) -> Result<&'a str, &'static str> {
@@ -22,7 +24,9 @@ impl App {
 
     /// Resolve the user-entered destination folder for a move. Relative paths
     /// are taken from the project root; absolute paths are allowed so items can
-    /// leave the project. Returns the canonical destination directory.
+    /// leave the project. The returned path is lexically normalized but NOT
+    /// canonicalized, so it stays comparable with `self.root` and tree paths
+    /// (the root itself may sit behind a symlink, e.g. macOS `/var`).
     fn resolve_move_destination(&self, target: &Path, value: &str) -> Result<PathBuf, String> {
         let trimmed = value.trim();
         let raw = if trimmed.is_empty() || trimmed == "." {
@@ -30,22 +34,26 @@ impl App {
         } else {
             self.root.join(trimmed)
         };
-        let dest = raw
-            .canonicalize()
-            .map_err(|_| "Destination folder does not exist".to_string())?;
+        let dest = normalize_lexically(&raw);
         if !dest.is_dir() {
-            return Err("Destination is not a folder".to_string());
+            return Err(if dest.exists() {
+                "Destination is not a folder".to_string()
+            } else {
+                "Destination folder does not exist".to_string()
+            });
         }
+        // Canonical forms are used only for identity comparisons.
+        let dest_canon = dest.canonicalize().unwrap_or_else(|_| dest.clone());
         let current_parent = target
             .parent()
             .and_then(|p| p.canonicalize().ok())
             .unwrap_or_else(|| self.root.clone());
-        if dest == current_parent {
+        if dest_canon == current_parent {
             return Err("Already in that folder".to_string());
         }
         if target.is_dir()
             && let Ok(target_canon) = target.canonicalize()
-            && dest.starts_with(&target_canon)
+            && dest_canon.starts_with(&target_canon)
         {
             return Err("Cannot move a folder into itself".to_string());
         }
@@ -488,7 +496,8 @@ impl App {
                     return Ok(());
                 };
                 let moved = dest_dir.join(name);
-                if moved.exists() {
+                // symlink_metadata also catches dangling symlinks, which exists() misses.
+                if fs::symlink_metadata(&moved).is_ok() {
                     self.set_status("Destination already has an item with that name");
                     return Ok(());
                 }
@@ -505,10 +514,14 @@ impl App {
                     }
                     self.expanded.insert(dir.to_path_buf());
                 }
+                let prev_selected = self.selected;
                 self.rebuild_tree()?;
-                if let Some(idx) = self.tree.iter().position(|i| i.path == moved) {
-                    self.selected = idx;
-                }
+                // Select the moved item; if it left the project, stay near where we were.
+                self.selected = self
+                    .tree
+                    .iter()
+                    .position(|i| i.path == moved)
+                    .unwrap_or_else(|| prev_selected.min(self.tree.len().saturating_sub(1)));
                 self.set_status(format!(
                     "Moved {} to {}",
                     name.to_string_lossy(),
@@ -752,7 +765,7 @@ mod tests {
     #[test]
     fn move_file_into_subdir_retargets_tab_and_selects_it() {
         let tmp = tempdir().expect("tempdir");
-        let root = tmp.path().canonicalize().expect("canon root");
+        let root = tmp.path().to_path_buf();
         let file = root.join("a.rs");
         fs::write(&file, "fn a() {}\n").expect("write a");
         fs::create_dir_all(root.join("src/app")).expect("create dirs");
@@ -780,7 +793,7 @@ mod tests {
     #[test]
     fn move_rejects_folder_into_itself_and_missing_destination() {
         let tmp = tempdir().expect("tempdir");
-        let root = tmp.path().canonicalize().expect("canon root");
+        let root = tmp.path().to_path_buf();
         let dir = root.join("pkg");
         fs::create_dir_all(dir.join("inner")).expect("create dirs");
         let mut app = new_app(&root);
@@ -817,7 +830,7 @@ mod tests {
     #[test]
     fn move_rejects_name_collision_and_allows_leaving_project() {
         let tmp = tempdir().expect("tempdir");
-        let base = tmp.path().canonicalize().expect("canon");
+        let base = tmp.path().to_path_buf();
         let root = base.join("proj");
         let outside = base.join("outside");
         fs::create_dir_all(root.join("dst")).expect("create");
@@ -845,6 +858,7 @@ mod tests {
         .expect("move outside");
         assert!(outside.join("x.txt").exists());
         assert!(!root.join("x.txt").exists());
+        assert!(app.selected < app.tree.len());
     }
 
     #[test]
