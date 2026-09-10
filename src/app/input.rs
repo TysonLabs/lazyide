@@ -89,21 +89,19 @@ impl App {
                     return Ok(());
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Delete) => {
-                if self.focus == Focus::Tree {
-                    if let Some(item) = self.selected_item().cloned() {
-                        if item.path == self.root {
-                            self.set_status("Cannot delete project root");
-                            return Ok(());
-                        }
-                        self.pending = PendingAction::Delete(item.path.clone());
-                        self.set_status(format!(
-                            "Delete {} ? Press Enter to confirm, Esc to cancel.",
-                            item.name,
-                        ));
+            (KeyModifiers::NONE, KeyCode::Delete) if self.focus == Focus::Tree => {
+                if let Some(item) = self.selected_item().cloned() {
+                    if item.path == self.root {
+                        self.set_status("Cannot delete project root");
+                        return Ok(());
                     }
-                    return Ok(());
+                    self.pending = PendingAction::Delete(item.path.clone());
+                    self.set_status(format!(
+                        "Delete {} ? Press Enter to confirm, Esc to cancel.",
+                        item.name,
+                    ));
                 }
+                return Ok(());
             }
             _ => {}
         }
@@ -202,13 +200,11 @@ impl App {
                         return Ok(());
                     }
                 }
-                MouseEventKind::Up(MouseButton::Left) => {
-                    if self.divider_dragging {
-                        self.divider_dragging = false;
-                        self.persist_state();
-                        self.set_status(format!("Files pane width: {}", self.files_pane_width));
-                        return Ok(());
-                    }
+                MouseEventKind::Up(MouseButton::Left) if self.divider_dragging => {
+                    self.divider_dragging = false;
+                    self.persist_state();
+                    self.set_status(format!("Files pane width: {}", self.files_pane_width));
+                    return Ok(());
                 }
                 _ => {}
             }

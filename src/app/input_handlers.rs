@@ -84,11 +84,9 @@ impl App {
             (_, KeyCode::End) => {
                 prompt.cursor = prompt.value.len();
             }
-            (_, KeyCode::Char(c)) => {
-                if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                    prompt.value.insert(prompt.cursor, c);
-                    prompt.cursor += 1;
-                }
+            (_, KeyCode::Char(c)) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                prompt.value.insert(prompt.cursor, c);
+                prompt.cursor += 1;
             }
             _ => {}
         }
@@ -120,14 +118,13 @@ impl App {
                 self.file_picker_index = 0;
                 self.refresh_file_picker_results();
             }
-            (_, KeyCode::Char(c)) => {
+            (_, KeyCode::Char(c))
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT)
-                {
-                    self.file_picker_query.push(c);
-                    self.file_picker_index = 0;
-                    self.refresh_file_picker_results();
-                }
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.file_picker_query.push(c);
+                self.file_picker_index = 0;
+                self.refresh_file_picker_results();
             }
             _ => {}
         }
@@ -730,13 +727,12 @@ impl App {
                 self.keybind_editor.query.pop();
                 self.refresh_keybind_editor_actions();
             }
-            (_, KeyCode::Char(c)) => {
+            (_, KeyCode::Char(c))
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT)
-                {
-                    self.keybind_editor.query.push(c);
-                    self.refresh_keybind_editor_actions();
-                }
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.keybind_editor.query.push(c);
+                self.refresh_keybind_editor_actions();
             }
             _ => {}
         }
@@ -786,13 +782,12 @@ impl App {
                 self.menu_query.pop();
                 self.refresh_menu_results();
             }
-            (_, KeyCode::Char(c)) => {
+            (_, KeyCode::Char(c))
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT)
-                {
-                    self.menu_query.push(c);
-                    self.refresh_menu_results();
-                }
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.menu_query.push(c);
+                self.refresh_menu_results();
             }
             _ => {}
         }
