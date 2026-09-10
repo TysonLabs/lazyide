@@ -171,10 +171,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                 Span::styled("[+]", Style::default().fg(theme.accent)),
                 Span::styled("[-]", Style::default().fg(theme.accent)),
             ]));
-            frame.render_widget(
-                btns,
-                Rect::new(btn_x, btn_y, btn_width, 1),
-            );
+            frame.render_widget(btns, Rect::new(btn_x, btn_y, btn_width, 1));
         }
         if app.files_view_open && app.divider_rect.width > 0 {
             let divider =
@@ -657,24 +654,23 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
                 // cursor off-screen — don't render
             } else if let Some(ghost) = app.completion.ghost.as_ref()
                 && !ghost.is_empty()
-                    && (cursor_x as u16 + App::EDITOR_GUTTER_WIDTH) < inner.width.saturating_sub(1)
-                {
-                    let ghost_area = Rect::new(
-                        inner
-                            .x
-                            .saturating_add(App::EDITOR_GUTTER_WIDTH)
-                            .saturating_add(cursor_x as u16),
-                        inner.y.saturating_add(cursor_y as u16),
-                        inner
-                            .width
-                            .saturating_sub(App::EDITOR_GUTTER_WIDTH)
-                            .saturating_sub(cursor_x as u16),
-                        1,
-                    );
-                    let ghost_span =
-                        Span::styled(ghost.clone(), Style::default().fg(theme.fg_muted));
-                    frame.render_widget(Paragraph::new(Line::from(vec![ghost_span])), ghost_area);
-                }
+                && (cursor_x as u16 + App::EDITOR_GUTTER_WIDTH) < inner.width.saturating_sub(1)
+            {
+                let ghost_area = Rect::new(
+                    inner
+                        .x
+                        .saturating_add(App::EDITOR_GUTTER_WIDTH)
+                        .saturating_add(cursor_x as u16),
+                    inner.y.saturating_add(cursor_y as u16),
+                    inner
+                        .width
+                        .saturating_sub(App::EDITOR_GUTTER_WIDTH)
+                        .saturating_sub(cursor_x as u16),
+                    1,
+                );
+                let ghost_span = Span::styled(ghost.clone(), Style::default().fg(theme.fg_muted));
+                frame.render_widget(Paragraph::new(Line::from(vec![ghost_span])), ghost_area);
+            }
             frame.set_cursor_position((
                 inner
                     .x

@@ -258,12 +258,13 @@ fn parse_unified_diff_into(diff: &str, result: &mut [GitLineStatus]) {
                 let nums: &str = plus_part.split_whitespace().next().unwrap_or("");
                 let mut parts = nums.split(',');
                 if let Some(start_str) = parts.next()
-                    && let Ok(start) = start_str.parse::<usize>() {
-                        new_line = start;
-                        let _count: usize = parts.next().and_then(|n| n.parse().ok()).unwrap_or(1);
-                        in_hunk = true;
-                        pending_deletes = 0;
-                    }
+                    && let Ok(start) = start_str.parse::<usize>()
+                {
+                    new_line = start;
+                    let _count: usize = parts.next().and_then(|n| n.parse().ok()).unwrap_or(1);
+                    in_hunk = true;
+                    pending_deletes = 0;
+                }
             }
             continue;
         }
@@ -499,12 +500,13 @@ pub(crate) fn compute_fold_ranges(
                     depth = depth.saturating_sub(1);
                     if ch == '}'
                         && let Some((_, start)) = stack.pop()
-                            && row > start {
-                                ranges.push(FoldRange {
-                                    start_line: start,
-                                    end_line: row,
-                                });
-                            }
+                        && row > start
+                    {
+                        ranges.push(FoldRange {
+                            start_line: start,
+                            end_line: row,
+                        });
+                    }
                 }
             } else if ch == '\\' {
                 i += 2;
@@ -1749,11 +1751,7 @@ mod async_git_tests {
         let fake_file = tmp.path().join("test.rs");
         std::fs::write(&fake_file, "fn main() {}\n").expect("write");
         let (tx, rx) = mpsc::channel();
-        spawn_git_refresh(
-            tmp.path().to_path_buf(),
-            vec![(fake_file.clone(), 1)],
-            tx,
-        );
+        spawn_git_refresh(tmp.path().to_path_buf(), vec![(fake_file.clone(), 1)], tx);
         let result = rx
             .recv_timeout(Duration::from_secs(5))
             .expect("should receive GitResult");

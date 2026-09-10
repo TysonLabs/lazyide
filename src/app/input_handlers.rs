@@ -582,7 +582,8 @@ impl App {
             KeyAction::PageUp => self.page_up(),
             KeyAction::GoToStart => {
                 if let Some(tab) = self.active_tab_mut() {
-                    tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(0, 0));
+                    tab.editor
+                        .move_cursor(ratatui_textarea::CursorMove::Jump(0, 0));
                 }
                 self.sync_editor_scroll_guess();
                 self.set_status("Top of file");

@@ -491,8 +491,14 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
         ),
         help_keybind_line(
             &[
-                (&kb.display_for(KeyAction::TreeExpandRecursive), "expand recursive"),
-                (&kb.display_for(KeyAction::TreeCollapseRecursive), "collapse recursive"),
+                (
+                    &kb.display_for(KeyAction::TreeExpandRecursive),
+                    "expand recursive",
+                ),
+                (
+                    &kb.display_for(KeyAction::TreeCollapseRecursive),
+                    "collapse recursive",
+                ),
             ],
             key_s,
             desc_s,
@@ -654,11 +660,13 @@ fn render_dialog(
 pub(crate) fn render_close_prompt(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme();
     let area = centered_rect(60, 26, frame.area());
-    let text = ["Unsaved changes".to_string(),
+    let text = [
+        "Unsaved changes".to_string(),
         "".to_string(),
         format!("Enter or {}+S: Save and close", primary_mod_label()),
         "Esc: Discard and close".to_string(),
-        "C: Cancel".to_string()]
+        "C: Cancel".to_string(),
+    ]
     .join("\n");
     render_dialog(area, "Close File", text, theme, frame);
 }

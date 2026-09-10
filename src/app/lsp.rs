@@ -77,9 +77,10 @@ impl App {
                 .and_then(Value::as_u64)
                 .unwrap_or(0) as usize;
             if let Ok(url) = Url::parse(uri)
-                && let Ok(path) = url.to_file_path() {
-                    target = Some((path, line, col));
-                }
+                && let Ok(path) = url.to_file_path()
+            {
+                target = Some((path, line, col));
+            }
         }
         let Some((path, line, col)) = target else {
             if self.try_local_definition_jump() {
@@ -553,11 +554,12 @@ impl App {
         let insert = item.insert_text.unwrap_or_else(|| item.label.clone());
         let prefix = self.current_identifier_prefix();
         if !prefix.is_empty()
-            && let Some(tab) = self.active_tab_mut() {
-                for _ in 0..prefix.chars().count() {
-                    let _ = tab.editor.delete_char();
-                }
+            && let Some(tab) = self.active_tab_mut()
+        {
+            for _ in 0..prefix.chars().count() {
+                let _ = tab.editor.delete_char();
             }
+        }
         let inserted = self
             .active_tab_mut()
             .is_some_and(|t| t.editor.insert_str(insert));

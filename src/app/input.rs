@@ -133,11 +133,8 @@ impl App {
         {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
                 // If prompt is open and click is inside the input area, move cursor
-                if self.prompt.is_some()
-                    && inside(mouse.column, mouse.row, self.prompt_rect)
-                {
-                    let inner_x =
-                        mouse.column.saturating_sub(self.prompt_rect.x + 1) as usize;
+                if self.prompt.is_some() && inside(mouse.column, mouse.row, self.prompt_rect) {
+                    let inner_x = mouse.column.saturating_sub(self.prompt_rect.x + 1) as usize;
                     if let Some(prompt) = self.prompt.as_mut() {
                         prompt.cursor = inner_x.min(prompt.value.len());
                     }
@@ -257,8 +254,8 @@ impl App {
                     self.open_tree_context_menu_at(mouse.column, mouse.row);
                 }
                 MouseEventKind::ScrollDown => {
-                    self.selected = (self.selected + Self::SCROLL_LINES)
-                        .min(self.tree.len().saturating_sub(1));
+                    self.selected =
+                        (self.selected + Self::SCROLL_LINES).min(self.tree.len().saturating_sub(1));
                 }
                 MouseEventKind::ScrollUp => {
                     self.selected = self.selected.saturating_sub(Self::SCROLL_LINES);
@@ -379,10 +376,8 @@ impl App {
                     }
                     let viewport_h = self.editor_rect.height.saturating_sub(2) as usize;
                     if let Some(tab) = self.active_tab_mut() {
-                        let max_scroll = tab
-                            .visible_rows_map
-                            .len()
-                            .saturating_sub(viewport_h.max(1));
+                        let max_scroll =
+                            tab.visible_rows_map.len().saturating_sub(viewport_h.max(1));
                         match mouse.kind {
                             MouseEventKind::ScrollDown => {
                                 tab.editor_scroll_row = tab
@@ -391,9 +386,8 @@ impl App {
                                     .min(max_scroll)
                             }
                             MouseEventKind::ScrollUp => {
-                                tab.editor_scroll_row = tab
-                                    .editor_scroll_row
-                                    .saturating_sub(Self::SCROLL_LINES)
+                                tab.editor_scroll_row =
+                                    tab.editor_scroll_row.saturating_sub(Self::SCROLL_LINES)
                             }
                             _ => {}
                         }
@@ -406,21 +400,20 @@ impl App {
                 }
                 MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
                     if !self.word_wrap
-                        && let Some(tab) = self.active_tab_mut() {
-                            match mouse.kind {
-                                MouseEventKind::ScrollLeft => {
-                                    tab.editor_scroll_col = tab
-                                        .editor_scroll_col
-                                        .saturating_sub(Self::SCROLL_LINES);
-                                }
-                                MouseEventKind::ScrollRight => {
-                                    tab.editor_scroll_col = tab
-                                        .editor_scroll_col
-                                        .saturating_add(Self::SCROLL_LINES);
-                                }
-                                _ => {}
+                        && let Some(tab) = self.active_tab_mut()
+                    {
+                        match mouse.kind {
+                            MouseEventKind::ScrollLeft => {
+                                tab.editor_scroll_col =
+                                    tab.editor_scroll_col.saturating_sub(Self::SCROLL_LINES);
                             }
+                            MouseEventKind::ScrollRight => {
+                                tab.editor_scroll_col =
+                                    tab.editor_scroll_col.saturating_add(Self::SCROLL_LINES);
+                            }
+                            _ => {}
                         }
+                    }
                     return Ok(());
                 }
                 _ => return Ok(()),

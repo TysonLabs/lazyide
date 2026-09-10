@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::Style;
-use serde_json::json;
 use ratatui_textarea::TextArea;
+use serde_json::json;
 
 use crate::keybinds::{KeyAction, KeyScope};
 use crate::persistence::autosave_path_for;
@@ -211,14 +211,18 @@ impl App {
             ));
         } else if total_lines == 1 {
             // Only one line: select all text on it
-            tab.editor
-                .move_cursor(ratatui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
+                to_u16_saturating(row),
+                0,
+            ));
             tab.editor.start_selection();
             tab.editor.move_cursor(ratatui_textarea::CursorMove::End);
         } else {
             // Select from start of this line to start of next line
-            tab.editor
-                .move_cursor(ratatui_textarea::CursorMove::Jump(to_u16_saturating(row), 0));
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
+                to_u16_saturating(row),
+                0,
+            ));
             tab.editor.start_selection();
             tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                 to_u16_saturating(row + 1),
@@ -231,9 +235,7 @@ impl App {
         if let Some(clipboard) = self.clipboard.as_mut() {
             let _ = clipboard.set_text(line_text.clone());
         }
-        self.tabs[self.active_tab]
-            .editor
-            .set_yank_text(line_text);
+        self.tabs[self.active_tab].editor.set_yank_text(line_text);
         self.on_editor_content_changed();
         self.set_status("Cut line");
     }
@@ -285,12 +287,13 @@ impl App {
         let mut from_system = false;
         if let Some(clipboard) = self.clipboard.as_mut()
             && let Ok(text) = clipboard.get_text()
-                && !text.is_empty() {
-                    if let Some(tab) = self.active_tab_mut() {
-                        tab.editor.set_yank_text(text);
-                    }
-                    from_system = true;
-                }
+            && !text.is_empty()
+        {
+            if let Some(tab) = self.active_tab_mut() {
+                tab.editor.set_yank_text(text);
+            }
+            from_system = true;
+        }
         if self.active_tab_mut().is_some_and(|t| t.editor.paste()) {
             self.on_editor_content_changed();
             if from_system {
@@ -588,9 +591,11 @@ impl App {
                 tab.editor_scroll_col = cursor_display_col;
             }
         } else if cursor_display_col >= scroll_col + content_width
-            && let Some(tab) = self.active_tab_mut() {
-                tab.editor_scroll_col = cursor_display_col.saturating_sub(content_width.saturating_sub(1));
-            }
+            && let Some(tab) = self.active_tab_mut()
+        {
+            tab.editor_scroll_col =
+                cursor_display_col.saturating_sub(content_width.saturating_sub(1));
+        }
     }
 
     /// After a scroll event, ensure the cursor stays within the visible
@@ -773,7 +778,12 @@ impl App {
         };
         let mut col = seg_start;
         let mut width_acc = 0usize;
-        for (i, &ch) in chars.iter().enumerate().take(seg_end.min(chars.len())).skip(seg_start) {
+        for (i, &ch) in chars
+            .iter()
+            .enumerate()
+            .take(seg_end.min(chars.len()))
+            .skip(seg_start)
+        {
             let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
             if width_acc + cw > effective_text_x {
                 break;
@@ -836,11 +846,7 @@ impl App {
                     0,
                 ));
             } else {
-                let line_len = tab
-                    .editor
-                    .lines()
-                    .get(end)
-                    .map_or(0, |l| l.chars().count());
+                let line_len = tab.editor.lines().get(end).map_or(0, |l| l.chars().count());
                 tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
                     to_u16_saturating(end),
                     to_u16_saturating(line_len),
@@ -865,17 +871,18 @@ impl App {
     pub(crate) fn extend_mouse_selection(&mut self, x: u16, y: u16) {
         if let (Some((anchor_row, anchor_col)), Some((row, col))) =
             (self.editor_drag_anchor, self.editor_pos_from_mouse(x, y))
-            && let Some(tab) = self.active_tab_mut() {
-                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
-                    to_u16_saturating(anchor_row),
-                    to_u16_saturating(anchor_col),
-                ));
-                tab.editor.start_selection();
-                tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
-                    to_u16_saturating(row),
-                    to_u16_saturating(col),
-                ));
-            }
+            && let Some(tab) = self.active_tab_mut()
+        {
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
+                to_u16_saturating(anchor_row),
+                to_u16_saturating(anchor_col),
+            ));
+            tab.editor.start_selection();
+            tab.editor.move_cursor(ratatui_textarea::CursorMove::Jump(
+                to_u16_saturating(row),
+                to_u16_saturating(col),
+            ));
+        }
     }
 }
 

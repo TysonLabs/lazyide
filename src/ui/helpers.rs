@@ -353,10 +353,7 @@ mod selection_span_tests {
     fn test_select_across_multiple_spans() {
         let kw = Style::default().fg(Color::Blue);
         let plain = Style::default();
-        let spans = vec![
-            Span::styled("fn ", kw),
-            Span::styled("main()", plain),
-        ];
+        let spans = vec![Span::styled("fn ", kw), Span::styled("main()", plain)];
         // Select "n main" (columns 1..7)
         let result = apply_selection_to_spans(spans, 1, 7, sel_style());
         assert_eq!(collect_text(&result), "fn main()");
