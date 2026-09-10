@@ -30,11 +30,12 @@ The app is now modular (library + thin binary launcher):
   - `editor.rs` (editor ops, file open/save/close, clipboard, paging/selection helpers)
   - `file_tree.rs` (tree build/navigation/context actions)
   - `search.rs` (find/replace/project search)
+  - `git_diff.rs` (diff view keys, next/previous change jumps)
   - `lsp.rs` (LSP lifecycle, diagnostics, completion, definition handling)
 - `src/ui/mod.rs` + `src/ui/overlays.rs` + `src/ui/helpers.rs` — drawing and overlays
 - Shared domain/util modules:
   - `src/types.rs`, `src/tab.rs`, `src/tree_item.rs`
-  - `src/theme.rs`, `src/syntax.rs`, `src/persistence.rs`, `src/lsp_client.rs`, `src/keybinds.rs`, `src/util.rs`
+  - `src/theme.rs`, `src/syntax.rs`, `src/persistence.rs`, `src/lsp_client.rs`, `src/keybinds.rs`, `src/diff.rs`, `src/util.rs`
 
 Core model remains the same:
 

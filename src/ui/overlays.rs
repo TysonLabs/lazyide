@@ -11,6 +11,7 @@ use crate::util::{
     command_action_label, context_actions, context_label, editor_context_actions,
     editor_context_label, primary_mod_label, relative_path,
 };
+use unicode_width::UnicodeWidthStr;
 
 use super::helpers::{
     centered_rect, clear_with_shadow, help_keybind_line, list_item_style, themed_block,
@@ -379,6 +380,16 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
             sep_s,
         ),
         help_keybind_line(
+            &[
+                (&kb.display_for(KeyAction::GitDiff), "git diff"),
+                (&kb.display_for(KeyAction::GitNextChange), "next change"),
+                (&kb.display_for(KeyAction::GitPrevChange), "prev change"),
+            ],
+            key_s,
+            desc_s,
+            sep_s,
+        ),
+        help_keybind_line(
             &[(
                 &kb.display_for(KeyAction::GoToDefinition),
                 "go to definition",
@@ -719,4 +730,129 @@ pub(crate) fn render_recovery_prompt(app: &mut App, frame: &mut Frame<'_>) {
     ]
     .join("\n");
     render_dialog(area, "Recover Autosave", text, theme, frame);
+}
+
+pub(crate) fn render_diff_view(app: &mut App, frame: &mut Frame<'_>) {
+    use crate::diff::{DiffLine, DiffLineKind, DiffRow, fit_width};
+
+    let theme = app.active_theme().clone();
+    let area = centered_rect(92, 86, frame.area());
+    app.diff_view.rect = area;
+    clear_with_shadow(frame, area, &theme);
+
+    let rel = app
+        .diff_view
+        .path
+        .as_ref()
+        .map(|p| relative_path(&app.root, p).display().to_string())
+        .unwrap_or_default();
+    let d = &app.diff_view.diff;
+    let title = format!(
+        " Diff vs HEAD: {rel}   +{} -{}   hunk {}/{}   n/p hunks · Enter jump · Esc close ",
+        d.added,
+        d.removed,
+        (app.diff_view.hunk_index + 1).min(d.hunks.len()),
+        d.hunks.len()
+    );
+
+    let inner_w = area.width.saturating_sub(2) as usize;
+    let inner_h = area.height.saturating_sub(2) as usize;
+    // [left half] │ [right half]
+    let half = inner_w.saturating_sub(1) / 2;
+    let right_w = inner_w.saturating_sub(1).saturating_sub(half);
+    // Line-number column sized to the largest number present (min 4 digits).
+    let max_no = d
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            DiffRow::Pair { left, right } => Some(
+                left.as_ref()
+                    .and_then(|l| l.old_no)
+                    .max(right.as_ref().and_then(|l| l.new_no))
+                    .unwrap_or(0),
+            ),
+            DiffRow::Header(_) => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let digits = max_no.to_string().len().max(4);
+    let num_w = digits + 1;
+    // Clamp a stale scroll (e.g. after a resize) without mutating state here.
+    let scroll = app
+        .diff_view
+        .scroll
+        .min(d.rows.len().saturating_sub(inner_h.max(1)));
+
+    let ctx_style = Style::default().fg(theme.fg);
+    let num_style = Style::default().fg(theme.fg_muted);
+    let removed_style = Style::default().fg(theme.git_deleted);
+    let added_style = Style::default().fg(theme.git_added);
+    let header_style = Style::default()
+        .fg(theme.accent)
+        .bg(theme.selection)
+        .add_modifier(Modifier::BOLD);
+    let sep_style = Style::default().fg(theme.border);
+
+    let side = |line: Option<&DiffLine>, width: usize, new_side: bool| -> Vec<Span<'static>> {
+        let Some(l) = line else {
+            return vec![Span::raw(" ".repeat(width))];
+        };
+        let (marker, style) = match l.kind {
+            DiffLineKind::Added => ("+", added_style),
+            DiffLineKind::Removed => ("-", removed_style),
+            DiffLineKind::Context => (" ", ctx_style),
+        };
+        let body = l.text.replace('\t', "    ");
+        // Too narrow for numbers: show what fits of the text alone.
+        if width < num_w + 2 {
+            let text = fit_width(&body, width);
+            let pad = width.saturating_sub(text.width());
+            return vec![Span::styled(text, style), Span::raw(" ".repeat(pad))];
+        }
+        let no = if new_side { l.new_no } else { l.old_no };
+        let num = no
+            .map(|n| format!("{n:>w$} ", w = digits))
+            .unwrap_or_else(|| " ".repeat(num_w));
+        let text_w = width - num_w - 1;
+        let text = fit_width(&body, text_w);
+        let pad = text_w.saturating_sub(text.width());
+        vec![
+            Span::styled(num, num_style),
+            Span::styled(marker.to_string(), style),
+            Span::styled(text, style),
+            Span::raw(" ".repeat(pad)),
+        ]
+    };
+
+    let current_hunk_row = d.hunks.get(app.diff_view.hunk_index).map(|h| h.start_row);
+    let mut lines: Vec<Line> = Vec::with_capacity(inner_h);
+    if d.rows.is_empty() {
+        lines.push(Line::from(Span::styled("No changes", num_style)));
+    }
+    for (idx, row) in d.rows.iter().enumerate().skip(scroll).take(inner_h) {
+        match row {
+            DiffRow::Header(h) => {
+                let mut st = header_style;
+                if Some(idx) != current_hunk_row {
+                    st = st.remove_modifier(Modifier::BOLD);
+                }
+                let text = fit_width(h, inner_w);
+                let pad = inner_w.saturating_sub(text.width());
+                lines.push(Line::from(vec![
+                    Span::styled(text, st),
+                    Span::styled(" ".repeat(pad), st),
+                ]));
+            }
+            DiffRow::Pair { left, right } => {
+                let mut spans = side(left.as_ref(), half, false);
+                spans.push(Span::styled("│", sep_style));
+                spans.extend(side(right.as_ref(), right_w, true));
+                lines.push(Line::from(spans));
+            }
+        }
+    }
+    let body = Paragraph::new(lines)
+        .style(Style::default().fg(theme.fg).bg(theme.bg_alt))
+        .block(themed_block(&theme).title(title));
+    frame.render_widget(body, area);
 }

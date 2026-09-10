@@ -41,6 +41,7 @@ pub(crate) enum CommandAction {
     GoToLine,
     Keybinds,
     ToggleWordWrap,
+    GitDiff,
 }
 
 #[derive(Debug, Clone)]

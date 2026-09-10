@@ -32,6 +32,7 @@ pub(crate) enum KeyAction {
     TreeCollapseAll,
     TreeExpandRecursive,
     TreeCollapseRecursive,
+    GitDiff,
     // Editor
     GoToDefinition,
     FoldToggle,
@@ -58,6 +59,8 @@ pub(crate) enum KeyAction {
     PageUp,
     GoToStart,
     GoToEnd,
+    GitNextChange,
+    GitPrevChange,
 }
 
 impl KeyAction {
@@ -84,6 +87,7 @@ impl KeyAction {
                 | KeyAction::TreeCollapseAll
                 | KeyAction::TreeExpandRecursive
                 | KeyAction::TreeCollapseRecursive
+                | KeyAction::GitDiff
         )
     }
 
@@ -102,6 +106,9 @@ impl KeyAction {
             KeyAction::Find => "Find",
             KeyAction::FindReplace => "Find & Replace",
             KeyAction::SearchFiles => "Search Files",
+            KeyAction::GitDiff => "Git Diff",
+            KeyAction::GitNextChange => "Next Change",
+            KeyAction::GitPrevChange => "Previous Change",
             KeyAction::GoToLine => "Go to Line",
             KeyAction::Help => "Help",
             KeyAction::NewFile => "New File",
@@ -163,6 +170,7 @@ impl KeyAction {
             KeyAction::TreeCollapseAll,
             KeyAction::TreeExpandRecursive,
             KeyAction::TreeCollapseRecursive,
+            KeyAction::GitDiff,
             KeyAction::GoToDefinition,
             KeyAction::FoldToggle,
             KeyAction::FoldAllToggle,
@@ -188,6 +196,8 @@ impl KeyAction {
             KeyAction::PageUp,
             KeyAction::GoToStart,
             KeyAction::GoToEnd,
+            KeyAction::GitNextChange,
+            KeyAction::GitPrevChange,
         ]
     }
 }
@@ -530,8 +540,11 @@ impl KeyBindings {
         bind(KeyAction::TreeCollapseAll, "ctrl+shift+c");
         bind(KeyAction::TreeExpandRecursive, "shift+right");
         bind(KeyAction::TreeCollapseRecursive, "shift+left");
+        bind(KeyAction::GitDiff, "f5");
 
         // Editor
+        bind(KeyAction::GitNextChange, "alt+n");
+        bind(KeyAction::GitPrevChange, "alt+p");
         bind(KeyAction::GoToDefinition, "ctrl+d");
         bind(KeyAction::GoToDefinition, "ctrl+alt+d");
         bind(KeyAction::FoldToggle, "ctrl+j");

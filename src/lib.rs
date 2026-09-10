@@ -15,6 +15,7 @@ use ratatui::crossterm::terminal::{
 };
 
 mod app;
+mod diff;
 mod keybinds;
 mod lsp_client;
 mod persistence;

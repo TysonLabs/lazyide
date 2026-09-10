@@ -1,4 +1,6 @@
-use super::{App, CompletionState, ContextMenuState, KeybindEditorState, SearchResultsState};
+use super::{
+    App, CompletionState, ContextMenuState, DiffViewState, KeybindEditorState, SearchResultsState,
+};
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -106,6 +108,7 @@ impl App {
                 index: 0,
             },
             search_results_rect: Rect::default(),
+            diff_view: DiffViewState::default(),
             file_picker_open: false,
             file_picker_query: String::new(),
             file_picker_results: Vec::new(),
@@ -487,6 +490,7 @@ impl App {
             CommandAction::GoToLine,
             CommandAction::Keybinds,
             CommandAction::ToggleWordWrap,
+            CommandAction::GitDiff,
         ];
         let q = self.menu_query.to_ascii_lowercase();
         self.menu_results = all
@@ -556,6 +560,7 @@ impl App {
                 self.refresh_keybind_editor_actions();
             }
             CommandAction::ToggleWordWrap => self.toggle_word_wrap(),
+            CommandAction::GitDiff => self.open_diff_view(),
         }
         Ok(())
     }
