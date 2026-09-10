@@ -661,15 +661,15 @@ pub(crate) enum SingleOrVec {
 }
 
 fn keybinds_file_path() -> Option<PathBuf> {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return Some(PathBuf::from(xdg).join(KEYBINDS_FILE_REL));
-        }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg.is_empty()
+    {
+        return Some(PathBuf::from(xdg).join(KEYBINDS_FILE_REL));
     }
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        if !appdata.is_empty() {
-            return Some(PathBuf::from(appdata).join(KEYBINDS_FILE_REL));
-        }
+    if let Ok(appdata) = std::env::var("APPDATA")
+        && !appdata.is_empty()
+    {
+        return Some(PathBuf::from(appdata).join(KEYBINDS_FILE_REL));
     }
     std::env::var("HOME")
         .ok()

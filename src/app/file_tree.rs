@@ -240,10 +240,10 @@ impl App {
             let _ = self.rebuild_tree();
             return;
         }
-        if let Some(parent) = item.path.parent() {
-            if let Some(idx) = self.tree.iter().position(|i| i.path == parent) {
-                self.selected = idx;
-            }
+        if let Some(parent) = item.path.parent()
+            && let Some(idx) = self.tree.iter().position(|i| i.path == parent)
+        {
+            self.selected = idx;
         }
     }
 
@@ -720,10 +720,11 @@ mod tests {
         );
         assert!(app.cached_file_list.iter().any(|p| p.ends_with("a.rs")));
         assert!(app.cached_file_list.iter().any(|p| p.ends_with("b.rs")));
-        assert!(app
-            .cached_file_list
-            .iter()
-            .any(|p| p.ends_with("src/c.rs") || p.ends_with("src\\c.rs")));
+        assert!(
+            app.cached_file_list
+                .iter()
+                .any(|p| p.ends_with("src/c.rs") || p.ends_with("src\\c.rs"))
+        );
     }
 
     #[test]

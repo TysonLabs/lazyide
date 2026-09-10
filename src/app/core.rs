@@ -23,8 +23,8 @@ use crate::theme::{Theme, load_themes};
 use crate::types::{CommandAction, Focus, PendingAction, PromptMode, PromptState};
 use crate::util::{
     command_action_label, compute_fold_ranges, compute_git_change_summary,
-    compute_git_file_statuses, detect_git_branch, relative_path, spawn_git_refresh,
-    text_to_lines, wrap_segments_for_line,
+    compute_git_file_statuses, detect_git_branch, relative_path, spawn_git_refresh, text_to_lines,
+    wrap_segments_for_line,
 };
 
 impl App {
@@ -255,10 +255,10 @@ impl App {
             // Dispatch async git refresh if not already in flight
             if !self.git_refresh_in_flight {
                 // Join the previous thread (prevents handle accumulation)
-                if let Some(handle) = self.git_thread_handle.take() {
-                    if handle.join().is_err() {
-                        self.set_status("Git refresh thread panicked");
-                    }
+                if let Some(handle) = self.git_thread_handle.take()
+                    && handle.join().is_err()
+                {
+                    self.set_status("Git refresh thread panicked");
                 }
                 let root = self.root.clone();
                 let tab_paths: Vec<(PathBuf, usize)> = self
@@ -557,12 +557,12 @@ impl App {
     }
 
     pub(crate) fn update_status_for_cursor(&mut self) {
-        if self.focus == Focus::Editor {
-            if let Some(tab) = self.active_tab() {
-                let cursor_row = tab.editor.cursor().0;
-                if let Some(diag) = tab.diagnostics.iter().find(|d| d.line == cursor_row + 1) {
-                    self.status = format!("[{}] {}", diag.severity, diag.message);
-                }
+        if self.focus == Focus::Editor
+            && let Some(tab) = self.active_tab()
+        {
+            let cursor_row = tab.editor.cursor().0;
+            if let Some(diag) = tab.diagnostics.iter().find(|d| d.line == cursor_row + 1) {
+                self.status = format!("[{}] {}", diag.severity, diag.message);
             }
         }
     }
@@ -595,11 +595,11 @@ impl App {
             return;
         };
         let current = self.tabs[self.active_tab].editor.lines().join("\n");
-        if recovered != current {
-            if let Some(tab) = self.active_tab_mut() {
-                tab.recovery_prompt_open = true;
-                tab.recovery_text = Some(recovered);
-            }
+        if recovered != current
+            && let Some(tab) = self.active_tab_mut()
+        {
+            tab.recovery_prompt_open = true;
+            tab.recovery_text = Some(recovered);
         }
     }
 
@@ -623,11 +623,12 @@ impl App {
             .open_disk_snapshot
             .clone()
             .unwrap_or_default();
-        if disk != snapshot && disk != current {
-            if let Some(tab) = self.active_tab_mut() {
-                tab.conflict_prompt_open = true;
-                tab.conflict_disk_text = Some(disk);
-            }
+        if disk != snapshot
+            && disk != current
+            && let Some(tab) = self.active_tab_mut()
+        {
+            tab.conflict_prompt_open = true;
+            tab.conflict_disk_text = Some(disk);
         }
         Ok(())
     }
@@ -682,12 +683,12 @@ impl App {
             .reserve(num_lines.saturating_sub(hidden.len()));
         tab.visible_row_ends
             .reserve(num_lines.saturating_sub(hidden.len()));
-        for row in 0..num_lines {
+        for (row, line) in lines.iter().enumerate().take(num_lines) {
             if !hidden.contains(&row) {
                 let segments = if word_wrap {
-                    wrap_segments_for_line(&lines[row], wrap_width)
+                    wrap_segments_for_line(line, wrap_width)
                 } else {
-                    vec![(0, lines[row].chars().count())]
+                    vec![(0, line.chars().count())]
                 };
                 for (start, end) in segments {
                     tab.visible_rows_map.push(row);
@@ -717,11 +718,11 @@ impl App {
     /// Called from the main loop to flush any pending wrap rebuild after a
     /// resize has settled.
     pub(crate) fn poll_wrap_rebuild(&mut self) {
-        if let Some(deadline) = self.wrap_rebuild_deadline {
-            if Instant::now() >= deadline {
-                self.wrap_rebuild_deadline = None;
-                self.rebuild_all_visible_rows();
-            }
+        if let Some(deadline) = self.wrap_rebuild_deadline
+            && Instant::now() >= deadline
+        {
+            self.wrap_rebuild_deadline = None;
+            self.rebuild_all_visible_rows();
         }
     }
 
@@ -831,14 +832,13 @@ impl App {
         let mut unfolded = false;
         let starts: Vec<usize> = tab.folded_starts.iter().copied().collect();
         for start in starts {
-            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start) {
-                if fr.start_line == cursor_row
-                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line)
-                {
-                    self.tabs[self.active_tab].folded_starts.remove(&start);
-                    unfolded = true;
-                    break;
-                }
+            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start)
+                && (fr.start_line == cursor_row
+                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line))
+            {
+                self.tabs[self.active_tab].folded_starts.remove(&start);
+                unfolded = true;
+                break;
             }
         }
         if unfolded {
@@ -887,13 +887,12 @@ impl App {
         // Check if cursor is on/in a folded block
         let mut is_folded = false;
         for &start in &tab.folded_starts {
-            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start) {
-                if fr.start_line == cursor_row
-                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line)
-                {
-                    is_folded = true;
-                    break;
-                }
+            if let Some(fr) = tab.fold_ranges.iter().find(|fr| fr.start_line == start)
+                && (fr.start_line == cursor_row
+                    || (fr.start_line <= cursor_row && cursor_row <= fr.end_line))
+            {
+                is_folded = true;
+                break;
             }
         }
         if is_folded {
@@ -930,11 +929,7 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let root = tmp.path();
         let file = root.join("test.rs");
-        fs::write(
-            &file,
-            "line 0\nline 1\nline 2\nline 3\nline 4\n",
-        )
-        .expect("write");
+        fs::write(&file, "line 0\nline 1\nline 2\nline 3\nline 4\n").expect("write");
         let mut app = new_app(root);
         app.open_file(file).expect("open");
         app.rebuild_visible_rows();
@@ -947,11 +942,7 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let root = tmp.path();
         let file = root.join("test.rs");
-        fs::write(
-            &file,
-            "fn main() {\n    line 1\n    line 2\n}\nline 4\n",
-        )
-        .expect("write");
+        fs::write(&file, "fn main() {\n    line 1\n    line 2\n}\nline 4\n").expect("write");
         let mut app = new_app(root);
         app.open_file(file).expect("open");
         // Fold the block starting at line 0 (fn main)
@@ -972,11 +963,7 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let root = tmp.path();
         let file = root.join("test.rs");
-        fs::write(
-            &file,
-            "fn a() {\n    body a\n}\nfn b() {\n    body b\n}\n",
-        )
-        .expect("write");
+        fs::write(&file, "fn a() {\n    body a\n}\nfn b() {\n    body b\n}\n").expect("write");
         let mut app = new_app(root);
         app.open_file(file).expect("open");
         // Fold both functions
@@ -1086,7 +1073,10 @@ mod tests {
         let tab = app.active_tab().expect("tab");
         // The long line should produce multiple segments (source row 0 appears more than once)
         let row0_count = tab.visible_rows_map.iter().filter(|&&r| r == 0).count();
-        assert!(row0_count > 1, "long line should wrap into multiple segments");
+        assert!(
+            row0_count > 1,
+            "long line should wrap into multiple segments"
+        );
         // The short line should produce a single segment
         let row1_count = tab.visible_rows_map.iter().filter(|&&r| r == 1).count();
         assert_eq!(row1_count, 1, "short line should be a single segment");
@@ -1186,7 +1176,10 @@ mod tests {
         app.wrap_rebuild_deadline =
             Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
         app.poll_wrap_rebuild();
-        assert!(app.wrap_rebuild_deadline.is_none(), "deadline should be cleared");
+        assert!(
+            app.wrap_rebuild_deadline.is_none(),
+            "deadline should be cleared"
+        );
     }
 
     #[test]

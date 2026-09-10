@@ -220,12 +220,12 @@ mod lsp_and_struct_tests {
     use crate::tab::{FoldRange, Tab};
     use crate::tree_item::TreeItem;
     use crate::util::file_uri;
+    use ratatui_textarea::TextArea;
     use serde_json::json;
     use std::collections::HashSet;
     use std::io::Cursor;
     use std::path::PathBuf;
     use std::sync::mpsc;
-    use ratatui_textarea::TextArea;
 
     #[test]
     fn test_lsp_reader_loop_valid_notification() {

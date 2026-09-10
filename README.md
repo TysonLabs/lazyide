@@ -2,7 +2,7 @@
 
 [![Version](https://img.shields.io/github/v/release/TysonLabs/lazyide?color=blue&label=version)](https://github.com/TysonLabs/lazyide/releases)
 [![License](https://img.shields.io/github/license/TysonLabs/lazyide)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/TysonLabs/lazyide/release.yml?label=build)](https://github.com/TysonLabs/lazyide/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/TysonLabs/lazyide/ci.yml?label=ci)](https://github.com/TysonLabs/lazyide/actions)
 ![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-brightgreen)
 
 A lightweight terminal IDE built with Rust and [ratatui](https://ratatui.rs). File tree, tabbed editing, LSP, syntax highlighting, code folding, git integration, project search, 32 themes, and customizable keybindings — all in a single binary.

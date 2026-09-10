@@ -257,13 +257,13 @@ fn parse_unified_diff_into(diff: &str, result: &mut [GitLineStatus]) {
             if let Some(plus_part) = line.split('+').nth(1) {
                 let nums: &str = plus_part.split_whitespace().next().unwrap_or("");
                 let mut parts = nums.split(',');
-                if let Some(start_str) = parts.next() {
-                    if let Ok(start) = start_str.parse::<usize>() {
-                        new_line = start;
-                        let _count: usize = parts.next().and_then(|n| n.parse().ok()).unwrap_or(1);
-                        in_hunk = true;
-                        pending_deletes = 0;
-                    }
+                if let Some(start_str) = parts.next()
+                    && let Ok(start) = start_str.parse::<usize>()
+                {
+                    new_line = start;
+                    let _count: usize = parts.next().and_then(|n| n.parse().ok()).unwrap_or(1);
+                    in_hunk = true;
+                    pending_deletes = 0;
                 }
             }
             continue;
@@ -498,15 +498,14 @@ pub(crate) fn compute_fold_ranges(
                     depth = depth.saturating_add(1);
                 } else if ch == '}' || ch == ')' || ch == ']' {
                     depth = depth.saturating_sub(1);
-                    if ch == '}' {
-                        if let Some((_, start)) = stack.pop() {
-                            if row > start {
-                                ranges.push(FoldRange {
-                                    start_line: start,
-                                    end_line: row,
-                                });
-                            }
-                        }
+                    if ch == '}'
+                        && let Some((_, start)) = stack.pop()
+                        && row > start
+                    {
+                        ranges.push(FoldRange {
+                            start_line: start,
+                            end_line: row,
+                        });
                     }
                 }
             } else if ch == '\\' {
@@ -656,8 +655,8 @@ pub(crate) fn wrap_segments_for_line(line: &str, wrap_width: usize) -> Vec<(usiz
         let start_w = cum_width[start];
         // Find the furthest char index whose display width fits within wrap_width.
         let mut hard_end = start;
-        for i in (start + 1)..=len {
-            if cum_width[i] - start_w > wrap_width {
+        for (i, &w) in cum_width.iter().enumerate().skip(start + 1) {
+            if w - start_w > wrap_width {
                 break;
             }
             hard_end = i;
@@ -1343,7 +1342,7 @@ mod fold_and_selection_tests {
     fn test_visible_rows_map_excludes_folded_lines() {
         // Simulate a 7-line file with lines 1-2 folded (fold starting at line 0)
         let lines: Vec<String> = (0..7).map(|i| format!("line {i}")).collect();
-        let fold_ranges = vec![FoldRange {
+        let fold_ranges = [FoldRange {
             start_line: 0,
             end_line: 2,
         }];
@@ -1752,11 +1751,7 @@ mod async_git_tests {
         let fake_file = tmp.path().join("test.rs");
         std::fs::write(&fake_file, "fn main() {}\n").expect("write");
         let (tx, rx) = mpsc::channel();
-        spawn_git_refresh(
-            tmp.path().to_path_buf(),
-            vec![(fake_file.clone(), 1)],
-            tx,
-        );
+        spawn_git_refresh(tmp.path().to_path_buf(), vec![(fake_file.clone(), 1)], tx);
         let result = rx
             .recv_timeout(Duration::from_secs(5))
             .expect("should receive GitResult");
@@ -1784,7 +1779,7 @@ mod indent_depth_tests {
     #[test]
     fn test_blank_line_depth_propagation_simple() {
         // Simulate the two-pass algorithm from draw()
-        let lines = vec!["    a", "", "    b"];
+        let lines = ["    a", "", "    b"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1824,7 +1819,7 @@ mod indent_depth_tests {
     #[test]
     fn test_blank_line_depth_min_of_neighbors() {
         // Blank line between different depths picks the minimum
-        let lines = vec!["        a", "", "    b"];
+        let lines = ["        a", "", "    b"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1865,7 +1860,7 @@ mod indent_depth_tests {
 
     #[test]
     fn test_consecutive_blank_lines_propagate() {
-        let lines = vec!["    a", "", "", "", "    b"];
+        let lines = ["    a", "", "", "", "    b"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1905,7 +1900,7 @@ mod indent_depth_tests {
 
     #[test]
     fn test_blank_lines_at_start_use_below() {
-        let lines = vec!["", "", "    code"];
+        let lines = ["", "", "    code"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1945,7 +1940,7 @@ mod indent_depth_tests {
 
     #[test]
     fn test_no_blank_lines() {
-        let lines = vec!["a", "    b", "        c"];
+        let lines = ["a", "    b", "        c"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];

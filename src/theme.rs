@@ -73,9 +73,8 @@ fn rgb_to_256(r: u8, g: u8, b: u8) -> Color {
     let cube_r = ri as i32 * 255 / 5;
     let cube_g = gi as i32 * 255 / 5;
     let cube_b = bi as i32 * 255 / 5;
-    let cube_dist = (r as i32 - cube_r).pow(2)
-        + (g as i32 - cube_g).pow(2)
-        + (b as i32 - cube_b).pow(2);
+    let cube_dist =
+        (r as i32 - cube_r).pow(2) + (g as i32 - cube_g).pow(2) + (b as i32 - cube_b).pow(2);
 
     let gray_val = if gray_idx == 232 {
         8
@@ -84,9 +83,8 @@ fn rgb_to_256(r: u8, g: u8, b: u8) -> Color {
     } else {
         8 + (gray_idx - 232) as i32 * 247 / 24 + 247 / 48
     };
-    let gray_dist = (r as i32 - gray_val).pow(2)
-        + (g as i32 - gray_val).pow(2)
-        + (b as i32 - gray_val).pow(2);
+    let gray_dist =
+        (r as i32 - gray_val).pow(2) + (g as i32 - gray_val).pow(2) + (b as i32 - gray_val).pow(2);
 
     if gray_dist < cube_dist {
         Color::Indexed(gray_idx)
