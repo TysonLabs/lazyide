@@ -507,12 +507,30 @@ impl KeyBind {
         if bind_code == KeyCode::BackTab && ev_code == KeyCode::BackTab {
             return (key.modifiers - KeyModifiers::SHIFT) == (self.modifiers - KeyModifiers::SHIFT);
         }
-        ev_code == bind_code && key.modifiers == self.modifiers
+        // Kitty-protocol terminals report ctrl+shift+f as Char('F') + CONTROL:
+        // the shifted codepoint replaces the key and the Shift flag is cleared.
+        // An uppercase ASCII letter therefore implies Shift.
+        let mut ev_mods = key.modifiers;
+        if let KeyCode::Char(c) = key.code
+            && c.is_ascii_uppercase()
+        {
+            ev_mods |= KeyModifiers::SHIFT;
+        }
+        let mut bind_mods = self.modifiers;
+        if let KeyCode::Char(c) = self.code
+            && c.is_ascii_uppercase()
+        {
+            bind_mods |= KeyModifiers::SHIFT;
+        }
+        ev_code == bind_code && ev_mods == bind_mods
     }
 
+    /// Two bindings conflict when lookup would treat them as the same key.
+    /// Mirrors the strict pass of `KeyBindings::lookup`, so `ctrl+f` and
+    /// `ctrl+shift+f` are distinct.
     pub(crate) fn conflicts_with(&self, other: &KeyBind) -> bool {
-        self.matches(&KeyEvent::new(other.code, other.modifiers))
-            || other.matches(&KeyEvent::new(self.code, self.modifiers))
+        self.matches_strict(&KeyEvent::new(other.code, other.modifiers))
+            || other.matches_strict(&KeyEvent::new(self.code, self.modifiers))
     }
 
     pub(crate) fn to_string_config(&self) -> String {
@@ -1062,11 +1080,15 @@ mod keybind_tests {
     #[test]
     fn test_find_conflict_matches_runtime_semantics_for_shifted_chars() {
         let kb = KeyBindings::defaults();
+        // Lookup keeps ctrl+s and ctrl+shift+s distinct, so binding the shifted
+        // form is not a conflict with Save...
         let bind = KeyBind::parse("ctrl+shift+s").unwrap();
-        // Runtime matching treats Ctrl+S and Ctrl+Shift+S as conflicting for Char keys.
+        assert_eq!(kb.find_conflict(&bind, KeyAction::NewFile), None);
+        // ...but the same shifted key already bound elsewhere is.
+        let bind = KeyBind::parse("ctrl+shift+f").unwrap();
         assert_eq!(
             kb.find_conflict(&bind, KeyAction::NewFile),
-            Some(KeyAction::Save)
+            Some(KeyAction::SearchFiles)
         );
     }
 
@@ -1190,24 +1212,26 @@ mod keybind_tests {
     #[test]
     fn test_lookup_prefers_shift_binding_when_event_carries_shift() {
         let kb = KeyBindings::defaults();
-        // ctrl+shift+f (as reported by kitty-protocol terminals) → Search Files,
-        // even though Find (ctrl+f) comes first in KeyAction::all().
-        let shifted = KeyEvent::new(
-            KeyCode::Char('F'),
+        // ctrl+shift+f → Search Files, even though Find (ctrl+f) comes first in
+        // KeyAction::all(). Kitty-protocol terminals report it as Char('F') with
+        // CONTROL only (Shift folded into the uppercase letter); some report
+        // CONTROL|SHIFT. Both must resolve the same way.
+        for mods in [
+            KeyModifiers::CONTROL,
             KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-        );
-        assert_eq!(
-            kb.lookup(&shifted, KeyScope::Global),
-            Some(KeyAction::SearchFiles)
-        );
+        ] {
+            let shifted = KeyEvent::new(KeyCode::Char('F'), mods);
+            assert_eq!(
+                kb.lookup(&shifted, KeyScope::Global),
+                Some(KeyAction::SearchFiles),
+                "mods {mods:?}"
+            );
+        }
         // Plain ctrl+f still goes to Find.
         let plain = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
         assert_eq!(kb.lookup(&plain, KeyScope::Global), Some(KeyAction::Find));
         // Editor scope: ctrl+shift+z → Redo, ctrl+z → Undo.
-        let redo = KeyEvent::new(
-            KeyCode::Char('Z'),
-            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-        );
+        let redo = KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::CONTROL);
         assert_eq!(kb.lookup(&redo, KeyScope::Editor), Some(KeyAction::Redo));
         let undo = KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL);
         assert_eq!(kb.lookup(&undo, KeyScope::Editor), Some(KeyAction::Undo));
