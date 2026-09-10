@@ -156,7 +156,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-288 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+289 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
 
 ## Adding a New Feature
 

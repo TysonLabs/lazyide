@@ -488,6 +488,21 @@ impl KeyBind {
         ev_code_normalized == bind_code_normalized && ev_mods == bind_mods_cmp
     }
 
+    /// Build a binding from a live key event in canonical form: control
+    /// characters become letters and an uppercase letter becomes the lowercase
+    /// letter plus Shift, so the binding round-trips through the config file.
+    pub(crate) fn from_event(key: &KeyEvent) -> KeyBind {
+        let mut modifiers = key.modifiers;
+        let code = match KeyBind::normalize_char_with_modifiers(key.code, key.modifiers) {
+            KeyCode::Char(c) if c.is_ascii_uppercase() => {
+                modifiers |= KeyModifiers::SHIFT;
+                KeyCode::Char(c.to_ascii_lowercase())
+            }
+            other => other,
+        };
+        KeyBind { modifiers, code }
+    }
+
     /// Like `matches`, but Shift must agree exactly for character keys, so a
     /// `ctrl+shift+f` binding does not swallow plain `ctrl+f` and vice versa.
     /// Used as the first lookup pass; `matches` remains the lenient fallback.
@@ -1265,6 +1280,20 @@ mod keybind_tests {
         let sr = KeyBind::parse("shift+right").unwrap();
         assert!(sr.matches_strict(&KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)));
         assert!(!sr.matches_strict(&KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn test_from_event_canonicalizes_uppercase_to_shift() {
+        let kb = KeyBind::from_event(&KeyEvent::new(KeyCode::Char('S'), KeyModifiers::CONTROL));
+        assert_eq!(kb, KeyBind::parse("ctrl+shift+s").unwrap());
+        assert_eq!(kb.to_string_config(), "ctrl+shift+s");
+        let plain = KeyBind::from_event(&KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert_eq!(plain.to_string_config(), "ctrl+s");
+        let ctl = KeyBind::from_event(&KeyEvent::new(
+            KeyCode::Char('\u{2}'),
+            KeyModifiers::CONTROL,
+        ));
+        assert_eq!(ctl.to_string_config(), "ctrl+b");
     }
 
     #[test]

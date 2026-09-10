@@ -648,10 +648,7 @@ impl App {
                 self.set_status("No matching actions to bind");
                 return Ok(());
             };
-            let bind = KeyBind {
-                modifiers: key.modifiers,
-                code: KeyBind::normalize_char_with_modifiers(key.code, key.modifiers),
-            };
+            let bind = KeyBind::from_event(&key);
             // Check for conflicts
             if let Some(conflict_action) = self.keybinds.find_conflict(&bind, action) {
                 self.set_status(format!(
