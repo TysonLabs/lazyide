@@ -202,6 +202,7 @@ pub(crate) enum DiffOutcome {
 pub(crate) fn git_diff_for_file(root: &Path, file_path: &Path) -> DiffOutcome {
     let rel = file_path.strip_prefix(root).unwrap_or(file_path);
     let output = Command::new("git")
+        .env("LC_ALL", "C")
         .arg("-C")
         .arg(root)
         .args(["diff", "--no-color", "--no-ext-diff", "HEAD", "--"])
@@ -237,6 +238,7 @@ pub(crate) fn git_diff_for_file(root: &Path, file_path: &Path) -> DiffOutcome {
     let code = s.trim_start();
     if code.starts_with("??") || code.starts_with('A') {
         return match std::fs::read_to_string(file_path) {
+            Ok(content) if content.contains('\0') => DiffOutcome::Binary,
             Ok(content) if !content.is_empty() => DiffOutcome::Diff(all_added_diff(&content)),
             Ok(_) => DiffOutcome::Clean,
             Err(_) => DiffOutcome::Binary,
