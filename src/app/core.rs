@@ -57,6 +57,7 @@ impl App {
             active_tab: 0,
             last_tree_click: None,
             status: String::new(),
+            status_set_at: None,
             pending: PendingAction::None,
             quit: false,
             files_view_open: true,
@@ -80,6 +81,7 @@ impl App {
             editor_rect: Rect::default(),
             divider_rect: Rect::default(),
             tab_rects: Vec::new(),
+            tab_bar_rect: Rect::default(),
             context_menu: ContextMenuState {
                 open: false,
                 index: 0,
@@ -165,12 +167,12 @@ impl App {
             if !has_rg {
                 missing.push("rg");
             }
-            app.status = format!(
+            app.set_status(format!(
                 "Missing tools: {}. Run `lazyide --setup` to install.",
                 missing.join(", ")
-            );
+            ));
         } else {
-            app.status = format!("Root: {}", app.root.display());
+            app.set_status(format!("Root: {}", app.root.display()));
         }
         Ok(app)
     }
@@ -564,7 +566,8 @@ impl App {
         {
             let cursor_row = tab.editor.cursor().0;
             if let Some(diag) = tab.diagnostics.iter().find(|d| d.line == cursor_row + 1) {
-                self.status = format!("[{}] {}", diag.severity, diag.message);
+                let message = format!("[{}] {}", diag.severity, diag.message);
+                self.set_status(message);
             }
         }
     }

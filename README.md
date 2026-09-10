@@ -81,7 +81,8 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 ### Interface
 - **32 themes** — dark and light, with live preview browser
 - **Customizable keybindings** — remap ~40 actions via config file or in-app editor
-- **Tabbed editing** — preview tabs, sticky tabs, dirty indicators
+- **Tabbed editing** — dedicated tab row, preview tabs, sticky tabs, dirty indicators
+- **Status bar** — focus mode, git branch with +/- counts, file breadcrumbs, cursor position, diagnostic counts
 - **File tree** — folders-first sorting, expand/collapse, context menus, resizable divider
 - **Command palette** — `Ctrl+P` for quick access to all actions
 - **Autosave & recovery** — buffers saved every 2s, crash recovery on reopen
