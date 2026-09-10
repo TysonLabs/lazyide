@@ -65,6 +65,7 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::GoToLine => "Go to Line",
         CommandAction::Keybinds => "Keybind Editor",
         CommandAction::ToggleWordWrap => "Toggle Word Wrap",
+        CommandAction::GitDiff => "Git Diff (current file)",
     }
 }
 

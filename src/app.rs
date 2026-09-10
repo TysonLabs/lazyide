@@ -26,6 +26,7 @@ pub(crate) struct GitResult {
 mod core;
 mod editor;
 mod file_tree;
+mod git_diff;
 mod input;
 mod input_handlers;
 mod lsp;
@@ -36,6 +37,16 @@ pub(crate) struct ContextMenuState {
     pub(crate) index: usize,
     pub(crate) target: Option<PathBuf>,
     pub(crate) pos: (u16, u16),
+    pub(crate) rect: Rect,
+}
+
+#[derive(Default)]
+pub(crate) struct DiffViewState {
+    pub(crate) open: bool,
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) diff: crate::diff::FileDiff,
+    pub(crate) scroll: usize,
+    pub(crate) hunk_index: usize,
     pub(crate) rect: Rect,
 }
 
@@ -125,6 +136,7 @@ pub(crate) struct App {
     pub(crate) editor_drag_anchor: Option<(usize, usize)>,
     pub(crate) gutter_drag_anchor: Option<usize>,
     pub(crate) search_results: SearchResultsState,
+    pub(crate) diff_view: DiffViewState,
     pub(crate) search_results_rect: Rect,
     pub(crate) file_picker_open: bool,
     pub(crate) file_picker_query: String,
