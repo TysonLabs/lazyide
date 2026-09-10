@@ -1,7 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, BorderType, Borders, Clear};
 
 use crate::theme::Theme;
 
@@ -55,8 +56,48 @@ pub(crate) fn list_item_style(selected: bool, theme: &Theme) -> Style {
 pub(crate) fn themed_block(theme: &Theme) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .style(Style::default().bg(theme.bg_alt))
         .border_style(Style::default().fg(theme.accent))
+}
+
+/// A darker version of `base` for drop shadows. True-color values are scaled
+/// down; palette colors fall back to a fixed dark gray.
+pub(crate) fn shadow_color(base: Color) -> Color {
+    match base {
+        Color::Rgb(r, g, b) => Color::Rgb(
+            (u16::from(r) * 3 / 5) as u8,
+            (u16::from(g) * 3 / 5) as u8,
+            (u16::from(b) * 3 / 5) as u8,
+        ),
+        _ => Color::Indexed(235),
+    }
+}
+
+/// Clear `area` for a popup and tint a 1-cell drop shadow below and to the
+/// right of it. The shadow recolors existing cells rather than blanking them,
+/// so underlying text stays faintly visible.
+pub(crate) fn clear_with_shadow(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    let screen = frame.area();
+    let shadow = Style::default()
+        .bg(shadow_color(theme.bg))
+        .fg(theme.fg_muted);
+    let buf = frame.buffer_mut();
+    let bottom_y = area.bottom();
+    if bottom_y < screen.bottom() {
+        let x_end = area.right().saturating_add(1).min(screen.right());
+        for x in area.x.saturating_add(1)..x_end {
+            buf[(x, bottom_y)].set_style(shadow);
+        }
+    }
+    let right_x = area.right();
+    if right_x < screen.right() {
+        let y_end = area.bottom().saturating_add(1).min(screen.bottom());
+        for y in area.y.saturating_add(1)..y_end {
+            buf[(right_x, y)].set_style(shadow);
+        }
+    }
+    frame.render_widget(Clear, area);
 }
 
 /// Clip spans to a horizontal window: skip `skip` display columns, then collect up to `width`
@@ -241,6 +282,21 @@ pub(crate) fn apply_indent_guides(
 
 #[cfg(test)]
 mod indent_guide_tests {
+    #[test]
+    fn shadow_color_darkens_rgb_and_falls_back_for_palette() {
+        use super::shadow_color;
+        use ratatui::style::Color;
+        assert_eq!(
+            shadow_color(Color::Rgb(100, 200, 50)),
+            Color::Rgb(60, 120, 30)
+        );
+        assert_eq!(
+            shadow_color(Color::Rgb(255, 255, 255)),
+            Color::Rgb(153, 153, 153)
+        );
+        assert_eq!(shadow_color(Color::Indexed(17)), Color::Indexed(235));
+    }
+
     use super::*;
     use ratatui::style::Color;
 

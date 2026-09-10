@@ -127,7 +127,7 @@ jobs:
           cd tap
 
           sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/lazyide.rb
-          sed -i "s|releases/download/v[^/]*/|releases/download/v${VERSION}/|g" Formula/lazyide.rb
+          sed -i "s|github.com/[^/]*/lazyide/releases/download/v[^/]*/|github.com/TysonLabs/lazyide/releases/download/v${VERSION}/|g" Formula/lazyide.rb
           sed -i "/lazyide-macos-aarch64.tar.gz/{n;s/sha256 \".*\"/sha256 \"${AARCH64_HASH}\"/;}" Formula/lazyide.rb
           sed -i "/lazyide-macos-x86_64.tar.gz/{n;s/sha256 \".*\"/sha256 \"${X86_64_HASH}\"/;}" Formula/lazyide.rb
 

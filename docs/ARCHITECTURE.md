@@ -74,25 +74,29 @@ Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling 
 
 ```
 1. Layout         3-row vertical: top bar | main content | status bar
-2. Main split     If file tree open: [tree | divider | editor], else [editor]
+2. Main split     If file tree open: [tree | editor], else [editor]. The editor's
+                  left border doubles as the draggable divider and is redrawn
+                  with ┬/┴ junctions in the focused pane's color.
 3. Top bar        "lazyide  root: ...  file: ...  git: branch  Δ: ~M +A ?U"
                   Git change summary shown when repo has uncommitted changes
 4. File tree      ListWidget with TreeItem names, indent by depth
-                  Files colored by git status (modified=yellow, added=green,
+                  Files colored by git status (theme git_modified/git_added,
                   untracked=muted), directories inherit highest child status
 5. Tab bar        Horizontal tab names with click rects, [x] close buttons
-6. Editor         Line-by-line rendering (11-char gutter):
-                    - Line number (5 chars + space)
+6. Editor         Line-by-line rendering inside a 1-char horizontal padding
+                  (App::editor_inner_rect), 11-char gutter:
+                    - Line number (5 chars)
                     - Fold indicator (triangle, 2 chars)
                     - Diagnostic marker (colored dot, 1 char)
-                    - Git marker (+/~/-, 1 char, colored green/yellow/red)
-                    - Space separator (1 char)
+                    - Git marker (+/~/-, 1 char, theme git_added/modified/deleted)
+                    - Gutter separator │ + space (2 chars)
                     - Syntax-highlighted text with indent guides (│ at 4-space tab stops)
                     - Horizontal scroll clipping (when word wrap off, via clip_spans_by_columns)
                     - Cursor row highlight, selection highlight
                     - Fold summary ("... [N lines]")
 7. Status bar     Dynamic keybind hints + status message + cursor position
 8. Overlays       Modals rendered last (on top): menus, prompts, help, etc.
+                  Each gets a 1-cell drop shadow (helpers::clear_with_shadow).
 ```
 
 ## LSP Integration
@@ -113,7 +117,7 @@ Themes are JSON files with color definitions. Loading priority:
 2. System paths (`/opt/homebrew/share/lazyide/themes/`, etc.)
 3. Embedded themes via `include_dir!("$CARGO_MANIFEST_DIR/themes")` (fallback, always available)
 
-Each theme defines: background, foreground, accent, selection, border colors + syntax colors (comment, string, number, tag, attribute) + bracket pair colors (yellow, purple, cyan).
+Each theme defines: background, foreground, accent, selection, border colors + syntax colors (comment, string, number, tag, attribute) + bracket pair colors (yellow, purple, cyan) + git colors (green/yellow/red from `colors`, falling back to the `terminal` palette, then ANSI defaults).
 
 ## Syntax Highlighting
 
@@ -145,7 +149,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-276 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+278 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
 
 ## Adding a New Feature
 

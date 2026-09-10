@@ -394,6 +394,9 @@ mod syntax_and_lang_tests {
             bracket_1: Color::Rgb(210, 168, 75),
             bracket_2: Color::Rgb(176, 82, 204),
             bracket_3: Color::Rgb(0, 175, 215),
+            git_added: Color::Green,
+            git_modified: Color::Yellow,
+            git_deleted: Color::Red,
         }
     }
 

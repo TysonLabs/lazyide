@@ -1,6 +1,6 @@
 [package]
 name = "lazyide"
-version = "0.3.87"
+version = "0.3.88"
 edition = "2024"
 
 [dependencies]

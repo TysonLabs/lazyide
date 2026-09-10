@@ -566,9 +566,8 @@ impl App {
         };
         let (cursor_row, cursor_col) = tab.editor.cursor();
         let content_width = self
-            .editor_rect
+            .editor_inner_rect()
             .width
-            .saturating_sub(2)
             .saturating_sub(Self::EDITOR_GUTTER_WIDTH) as usize;
         if content_width == 0 {
             return;
@@ -741,8 +740,9 @@ impl App {
             return None;
         }
         let tab = self.active_tab()?;
-        let inner_x = x.saturating_sub(self.editor_rect.x.saturating_add(1)) as usize;
-        let inner_y = y.saturating_sub(self.editor_rect.y.saturating_add(1)) as usize;
+        let inner = self.editor_inner_rect();
+        let inner_x = x.saturating_sub(inner.x) as usize;
+        let inner_y = y.saturating_sub(inner.y) as usize;
         let lines = tab.editor.lines();
         if lines.is_empty() {
             return Some((0, 0));

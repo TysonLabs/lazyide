@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem, Paragraph, Wrap};
 
 use crate::app::App;
 use crate::keybinds::KeyAction;
@@ -12,13 +12,15 @@ use crate::util::{
     editor_context_label, primary_mod_label, relative_path,
 };
 
-use super::helpers::{centered_rect, help_keybind_line, list_item_style, themed_block};
+use super::helpers::{
+    centered_rect, clear_with_shadow, help_keybind_line, list_item_style, themed_block,
+};
 
 pub(crate) fn render_menu(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(62, 62, frame.area());
     app.menu_rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let mut items: Vec<ListItem> = Vec::new();
     items.push(ListItem::new(Line::from(vec![
         Span::styled("Query: ", Style::default().fg(theme.fg_muted)),
@@ -55,7 +57,7 @@ pub(crate) fn render_theme_browser(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(62, 70, frame.area());
     app.theme_browser_rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let list_items: Vec<ListItem> = app
         .themes
         .iter()
@@ -79,7 +81,7 @@ pub(crate) fn render_file_picker(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(72, 65, frame.area());
     app.file_picker_rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(vec![
         Span::styled("Query: ", Style::default().fg(theme.fg_muted)),
@@ -117,7 +119,7 @@ pub(crate) fn render_search_results(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(78, 72, frame.area());
     app.search_results_rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let list_items: Vec<ListItem> = if app.search_results.results.is_empty() {
         vec![ListItem::new(Line::from("No results"))]
     } else {
@@ -153,7 +155,7 @@ pub(crate) fn render_completion_popup(app: &mut App, frame: &mut Frame<'_>) {
     let y = app.editor_rect.y.saturating_add(2).min(max_y);
     let area = Rect::new(x, y, width, height);
     app.completion.rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let list_items: Vec<ListItem> = app
         .completion
         .items
@@ -181,7 +183,7 @@ pub(crate) fn render_completion_popup(app: &mut App, frame: &mut Frame<'_>) {
 pub(crate) fn render_keybind_editor(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(72, 78, frame.area());
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let heading = Style::default()
         .fg(theme.accent)
         .add_modifier(Modifier::BOLD);
@@ -318,7 +320,7 @@ pub(crate) fn render_keybind_editor(app: &mut App, frame: &mut Frame<'_>) {
 pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme();
     let area = centered_rect(78, 80, frame.area());
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, theme);
 
     let kb = &app.keybinds;
     let heading = Style::default()
@@ -563,7 +565,7 @@ pub(crate) fn render_context_menu(app: &mut App, frame: &mut Frame<'_>) {
     let y = app.context_menu.pos.1.min(max_y);
     let area = Rect::new(x, y, width, height);
     app.context_menu.rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let list_items: Vec<ListItem> = context_actions()
         .iter()
         .enumerate()
@@ -596,7 +598,7 @@ pub(crate) fn render_editor_context_menu(app: &mut App, frame: &mut Frame<'_>) {
     let y = app.editor_context_menu_pos.1.min(max_y);
     let area = Rect::new(x, y, width, height);
     app.editor_context_menu_rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let list_items: Vec<ListItem> = editor_context_actions()
         .iter()
         .enumerate()
@@ -626,7 +628,7 @@ pub(crate) fn render_prompt(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme().clone();
     let area = centered_rect(60, 20, frame.area());
     app.prompt_rect = area;
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, &theme);
     let input = Paragraph::new(value).block(
         themed_block(&theme)
             .title(title.as_str())
@@ -649,7 +651,7 @@ fn render_dialog(
     theme: &crate::theme::Theme,
     frame: &mut Frame<'_>,
 ) {
-    frame.render_widget(Clear, area);
+    clear_with_shadow(frame, area, theme);
     let body = Paragraph::new(text)
         .wrap(Wrap { trim: true })
         .style(Style::default().fg(theme.fg).bg(theme.bg_alt))
