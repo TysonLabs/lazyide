@@ -628,6 +628,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     if app.search_results.open {
         render_search_results(app, frame);
     }
+    if app.diff_view.open {
+        render_diff_view(app, frame);
+    }
     if app.completion.open {
         render_completion_popup(app, frame);
     }

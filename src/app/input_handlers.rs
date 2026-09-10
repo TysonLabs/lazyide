@@ -468,6 +468,9 @@ impl App {
             KeyAction::SearchFiles => {
                 self.open_project_search_prompt();
             }
+            KeyAction::GitDiff => self.open_diff_view(),
+            KeyAction::GitNextChange => self.jump_to_change(true),
+            KeyAction::GitPrevChange => self.jump_to_change(false),
             KeyAction::GoToLine => {
                 self.open_go_to_line_prompt();
             }

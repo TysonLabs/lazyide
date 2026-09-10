@@ -34,6 +34,9 @@ impl App {
         if self.completion.open {
             return self.handle_completion_key(key);
         }
+        if self.diff_view.open {
+            return self.handle_diff_view_key(key);
+        }
         if self.search_results.open {
             return self.handle_search_results_key(key);
         }
@@ -158,6 +161,9 @@ impl App {
             return Ok(());
         }
 
+        if self.diff_view.open {
+            return self.handle_diff_view_mouse(mouse);
+        }
         if self.search_results.open {
             return self.handle_search_results_mouse(mouse);
         }

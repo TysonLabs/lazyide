@@ -17,12 +17,14 @@ src/
     file_tree.rs       Tree build, navigation, file create/rename/delete
     lsp.rs             LSP lifecycle, completion, diagnostics, go-to-definition
     search.rs          Find/replace in file, project search (ripgrep)
+    git_diff.rs        Diff view open/scroll/hunk keys, next/previous change jumps
   ui/
     mod.rs             Main draw() function (layout, tree pane, tab row, editor pane)
     status_bar.rs      Structured status bar (mode, branch, breadcrumbs, cursor, diagnostics)
     overlays.rs        Overlays: command palette, theme browser, help, prompts, etc.
     helpers.rs         UI utilities (centered_rect, label helpers, indent guides, horizontal span clipping)
   keybinds.rs          KeyAction enum, KeyBind, KeyBindings, JSON load/save
+  diff.rs              Unified diff -> side-by-side rows (FileDiff/DiffRow), change-jump helper
   types.rs             Focus, PendingAction, PromptMode, CommandAction enums
   tab.rs               Tab struct (incl. editor_scroll_col for horizontal scroll), FoldRange, ProjectSearchHit, GitLineStatus, GitFileStatus, GitChangeSummary
   tree_item.rs         TreeItem struct
@@ -141,6 +143,7 @@ Git status is computed by shelling out to `git` (no libgit2 dependency):
 - **File statuses**: `git status --porcelain -z` → NUL-separated parsing for safe handling of paths with spaces/special characters. Statuses propagate up to parent directories (Modified > Added > Untracked priority, matching VS Code behavior).
 - **Line statuses**: `git diff HEAD -- <file>` → unified diff hunk parsing. Falls back to `git status --porcelain` for untracked files (all lines marked Added). Stored per-tab in `Tab.git_line_status`.
 - **Change summary**: `GitChangeSummary` counts (modified/added/untracked) shown in top bar as `Δ: ~M +A ?U`.
+- **Diff view**: `diff::git_diff_for_file` runs `git diff HEAD -- <file>` (untracked files become all-added) and `parse_unified_diff` pairs removed/added runs into `DiffRow`s; `ui/overlays.rs::render_diff_view` draws them side by side with hunk headers. `app/git_diff.rs` owns the keys (n/p hunks, Enter jumps) and `Alt+N`/`Alt+P` change jumps via `diff::next_change_row` over the gutter statuses.
 - **Refresh triggers**: file open, file save, and FS change events. FS refresh uses path-aware event coalescing — only affected tabs recompute line status, with full fallback for `.git/` changes or ambiguous events.
 
 ## Testing
@@ -153,7 +156,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-280 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+285 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
 
 ## Adding a New Feature
 

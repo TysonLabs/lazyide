@@ -65,6 +65,7 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::GoToLine => "Go to Line",
         CommandAction::Keybinds => "Keybind Editor",
         CommandAction::ToggleWordWrap => "Toggle Word Wrap",
+        CommandAction::GitDiff => "Git Diff (current file)",
     }
 }
 
@@ -213,7 +214,7 @@ pub(crate) fn compute_git_line_status(
     let diff_output = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["diff", "HEAD", "--"])
+        .args(["diff", "--no-color", "--no-ext-diff", "HEAD", "--"])
         .arg(rel_str.as_ref())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
