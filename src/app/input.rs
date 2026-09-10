@@ -288,13 +288,18 @@ impl App {
                     }
                     return Ok(());
                 }
-                // Scroll events on the tab bar fall through to the editor scroll handler
+                // Scroll events on the tab bar are forwarded to the editor below
                 MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {}
                 _ => return Ok(()),
             }
         }
 
-        if inside(mouse.column, mouse.row, self.editor_rect) {
+        let scroll_over_tabs = inside(mouse.column, mouse.row, self.tab_bar_rect)
+            && matches!(
+                mouse.kind,
+                MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+            );
+        if inside(mouse.column, mouse.row, self.editor_rect) || scroll_over_tabs {
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     self.focus = Focus::Editor;

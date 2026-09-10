@@ -167,12 +167,12 @@ impl App {
             if !has_rg {
                 missing.push("rg");
             }
-            app.status = format!(
+            app.set_status(format!(
                 "Missing tools: {}. Run `lazyide --setup` to install.",
                 missing.join(", ")
-            );
+            ));
         } else {
-            app.status = format!("Root: {}", app.root.display());
+            app.set_status(format!("Root: {}", app.root.display()));
         }
         Ok(app)
     }
@@ -566,7 +566,8 @@ impl App {
         {
             let cursor_row = tab.editor.cursor().0;
             if let Some(diag) = tab.diagnostics.iter().find(|d| d.line == cursor_row + 1) {
-                self.status = format!("[{}] {}", diag.severity, diag.message);
+                let message = format!("[{}] {}", diag.severity, diag.message);
+                self.set_status(message);
             }
         }
     }

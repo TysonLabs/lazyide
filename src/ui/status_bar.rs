@@ -96,8 +96,16 @@ pub(crate) fn render_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // Center: whatever fits between the two sides
     let left_w: usize = left.iter().map(|s| s.content.as_ref().width()).sum();
     let right_w: usize = right.iter().map(|s| s.content.as_ref().width()).sum();
-    let gap = 2usize;
-    let center_w = inner_w.saturating_sub(left_w + right_w + 2 * gap);
+    // Shrink the gaps before clipping the right segment on narrow terminals.
+    let fixed_w = left_w + right_w;
+    let gap = if inner_w >= fixed_w + 4 {
+        2usize
+    } else if inner_w >= fixed_w + 2 {
+        1
+    } else {
+        0
+    };
+    let center_w = inner_w.saturating_sub(fixed_w + 2 * gap);
     let (center_text, center_style) = center_content(app, theme);
     let center_text = fit_center(&center_text, center_w);
     let pad_total = center_w.saturating_sub(center_text.width());
