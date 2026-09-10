@@ -4,7 +4,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, Mous
 use ratatui_textarea::CursorMove;
 
 use super::App;
-use crate::diff::{git_diff_for_file, next_change_row};
+use crate::diff::{DiffOutcome, git_diff_for_file, next_change_row};
 use crate::util::{inside, relative_path, to_u16_saturating};
 
 impl App {
@@ -14,9 +14,16 @@ impl App {
             self.set_status("No file open to diff");
             return;
         };
-        let Some(diff) = git_diff_for_file(&self.root, &path) else {
-            self.set_status("No changes against HEAD");
-            return;
+        let diff = match git_diff_for_file(&self.root, &path) {
+            DiffOutcome::Diff(d) => d,
+            DiffOutcome::Binary => {
+                self.set_status("Binary file changed; no text diff to show");
+                return;
+            }
+            DiffOutcome::Clean => {
+                self.set_status("No changes against HEAD");
+                return;
+            }
         };
         let rel = relative_path(&self.root, &path).display().to_string();
         let note = if self.is_dirty() {
@@ -56,6 +63,25 @@ impl App {
         }
     }
 
+    /// Clamp the scroll offset and point `hunk_index` at the hunk whose
+    /// header is at or above the top of the viewport.
+    fn diff_view_sync(&mut self) {
+        let max = self.diff_view_max_scroll();
+        if self.diff_view.scroll > max {
+            self.diff_view.scroll = max;
+        }
+        let scroll = self.diff_view.scroll;
+        if let Some(i) = self
+            .diff_view
+            .diff
+            .hunks
+            .iter()
+            .rposition(|h| h.start_row <= scroll)
+        {
+            self.diff_view.hunk_index = i;
+        }
+    }
+
     pub(crate) fn handle_diff_view_key(&mut self, key: KeyEvent) -> io::Result<()> {
         let max = self.diff_view_max_scroll();
         match key.code {
@@ -64,20 +90,30 @@ impl App {
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.diff_view.scroll = (self.diff_view.scroll + 1).min(max);
+                self.diff_view_sync();
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.diff_view.scroll = self.diff_view.scroll.saturating_sub(1);
+                self.diff_view_sync();
             }
             KeyCode::PageDown | KeyCode::Char(' ') => {
                 let page = self.diff_view_page();
                 self.diff_view.scroll = (self.diff_view.scroll + page).min(max);
+                self.diff_view_sync();
             }
             KeyCode::PageUp => {
                 let page = self.diff_view_page();
                 self.diff_view.scroll = self.diff_view.scroll.saturating_sub(page);
+                self.diff_view_sync();
             }
-            KeyCode::Home | KeyCode::Char('g') => self.diff_view.scroll = 0,
-            KeyCode::End | KeyCode::Char('G') => self.diff_view.scroll = max,
+            KeyCode::Home | KeyCode::Char('g') => {
+                self.diff_view.scroll = 0;
+                self.diff_view_sync();
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                self.diff_view.scroll = max;
+                self.diff_view_sync();
+            }
             KeyCode::Char('n') | KeyCode::Char(']') => {
                 let next = self.diff_view.hunk_index + 1;
                 if next < self.diff_view.diff.hunks.len() {
@@ -112,9 +148,11 @@ impl App {
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 self.diff_view.scroll = (self.diff_view.scroll + 3).min(max);
+                self.diff_view_sync();
             }
             MouseEventKind::ScrollUp => {
                 self.diff_view.scroll = self.diff_view.scroll.saturating_sub(3);
+                self.diff_view_sync();
             }
             MouseEventKind::Down(MouseButton::Left)
                 if !inside(mouse.column, mouse.row, self.diff_view.rect) =>

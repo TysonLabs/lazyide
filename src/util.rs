@@ -214,7 +214,7 @@ pub(crate) fn compute_git_line_status(
     let diff_output = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["diff", "HEAD", "--"])
+        .args(["diff", "--no-color", "--no-ext-diff", "HEAD", "--"])
         .arg(rel_str.as_ref())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

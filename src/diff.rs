@@ -187,24 +187,42 @@ pub(crate) fn all_added_diff(content: &str) -> FileDiff {
     out
 }
 
-/// Diff of `file_path` against HEAD. Untracked files come back as all-added.
-/// Returns `None` when git is unavailable or the file is clean.
-pub(crate) fn git_diff_for_file(root: &Path, file_path: &Path) -> Option<FileDiff> {
+/// Result of asking git for a file's diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DiffOutcome {
+    Diff(FileDiff),
+    /// Git reports a change but has no text hunks to show.
+    Binary,
+    /// Clean, or git unavailable.
+    Clean,
+}
+
+/// Diff of `file_path` against HEAD. Untracked (or staged-new in an unborn
+/// repository) files come back as all-added.
+pub(crate) fn git_diff_for_file(root: &Path, file_path: &Path) -> DiffOutcome {
     let rel = file_path.strip_prefix(root).unwrap_or(file_path);
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["diff", "HEAD", "--"])
+        .args(["diff", "--no-color", "--no-ext-diff", "HEAD", "--"])
         .arg(rel)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if output.status.success() && !output.stdout.is_empty() {
-        let diff = parse_unified_diff(&String::from_utf8_lossy(&output.stdout));
-        return (!diff.is_empty()).then_some(diff);
+        .output();
+    if let Ok(output) = &output
+        && output.status.success()
+        && !output.stdout.is_empty()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        let diff = parse_unified_diff(&text);
+        if !diff.is_empty() {
+            return DiffOutcome::Diff(diff);
+        }
+        if text.contains("Binary files") {
+            return DiffOutcome::Binary;
+        }
     }
-    let status = Command::new("git")
+    let Ok(status) = Command::new("git")
         .arg("-C")
         .arg(root)
         .args(["status", "--porcelain", "--"])
@@ -212,13 +230,19 @@ pub(crate) fn git_diff_for_file(root: &Path, file_path: &Path) -> Option<FileDif
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
-        .ok()?;
+    else {
+        return DiffOutcome::Clean;
+    };
     let s = String::from_utf8_lossy(&status.stdout);
-    if s.trim_start().starts_with("??") {
-        let content = std::fs::read_to_string(file_path).ok()?;
-        return Some(all_added_diff(&content));
+    let code = s.trim_start();
+    if code.starts_with("??") || code.starts_with('A') {
+        return match std::fs::read_to_string(file_path) {
+            Ok(content) if !content.is_empty() => DiffOutcome::Diff(all_added_diff(&content)),
+            Ok(_) => DiffOutcome::Clean,
+            Err(_) => DiffOutcome::Binary,
+        };
     }
-    None
+    DiffOutcome::Clean
 }
 
 /// Row index of the next (or previous) start of a changed run relative to
@@ -350,6 +374,13 @@ index 1..2 100644
             } => assert_eq!((r.new_no, r.text.as_str()), (Some(2), "b")),
             other => panic!("unexpected row: {other:?}"),
         }
+    }
+
+    #[test]
+    fn all_added_diff_of_empty_content_has_no_lines() {
+        let d = all_added_diff("");
+        assert_eq!(d.added, 0);
+        assert_eq!(d.rows.len(), 1); // header only; callers treat empty files as clean
     }
 
     #[test]

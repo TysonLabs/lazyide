@@ -760,7 +760,28 @@ pub(crate) fn render_diff_view(app: &mut App, frame: &mut Frame<'_>) {
     // [left half] │ [right half]
     let half = inner_w.saturating_sub(1) / 2;
     let right_w = inner_w.saturating_sub(1).saturating_sub(half);
-    let num_w = 5usize;
+    // Line-number column sized to the largest number present (min 4 digits).
+    let max_no = d
+        .rows
+        .iter()
+        .filter_map(|r| match r {
+            DiffRow::Pair { left, right } => Some(
+                left.as_ref()
+                    .and_then(|l| l.old_no)
+                    .max(right.as_ref().and_then(|l| l.new_no))
+                    .unwrap_or(0),
+            ),
+            DiffRow::Header(_) => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let digits = max_no.to_string().len().max(4);
+    let num_w = digits + 1;
+    // Clamp a stale scroll (e.g. after a resize) without mutating state here.
+    let scroll = app
+        .diff_view
+        .scroll
+        .min(d.rows.len().saturating_sub(inner_h.max(1)));
 
     let ctx_style = Style::default().fg(theme.fg);
     let num_style = Style::default().fg(theme.fg_muted);
@@ -776,17 +797,24 @@ pub(crate) fn render_diff_view(app: &mut App, frame: &mut Frame<'_>) {
         let Some(l) = line else {
             return vec![Span::raw(" ".repeat(width))];
         };
-        let no = if new_side { l.new_no } else { l.old_no };
-        let num = no
-            .map(|n| format!("{n:>4} "))
-            .unwrap_or_else(|| " ".repeat(num_w));
         let (marker, style) = match l.kind {
             DiffLineKind::Added => ("+", added_style),
             DiffLineKind::Removed => ("-", removed_style),
             DiffLineKind::Context => (" ", ctx_style),
         };
-        let text_w = width.saturating_sub(num_w + 1);
-        let text = fit_width(&l.text.replace('\t', "    "), text_w);
+        let body = l.text.replace('\t', "    ");
+        // Too narrow for numbers: show what fits of the text alone.
+        if width < num_w + 2 {
+            let text = fit_width(&body, width);
+            let pad = width.saturating_sub(text.width());
+            return vec![Span::styled(text, style), Span::raw(" ".repeat(pad))];
+        }
+        let no = if new_side { l.new_no } else { l.old_no };
+        let num = no
+            .map(|n| format!("{n:>w$} ", w = digits))
+            .unwrap_or_else(|| " ".repeat(num_w));
+        let text_w = width - num_w - 1;
+        let text = fit_width(&body, text_w);
         let pad = text_w.saturating_sub(text.width());
         vec![
             Span::styled(num, num_style),
@@ -801,12 +829,11 @@ pub(crate) fn render_diff_view(app: &mut App, frame: &mut Frame<'_>) {
     if d.rows.is_empty() {
         lines.push(Line::from(Span::styled("No changes", num_style)));
     }
-    for row in d.rows.iter().skip(app.diff_view.scroll).take(inner_h) {
+    for (idx, row) in d.rows.iter().enumerate().skip(scroll).take(inner_h) {
         match row {
             DiffRow::Header(h) => {
-                let idx = d.rows.iter().position(|r| std::ptr::eq(r, row));
                 let mut st = header_style;
-                if idx != current_hunk_row {
+                if Some(idx) != current_hunk_row {
                     st = st.remove_modifier(Modifier::BOLD);
                 }
                 let text = fit_width(h, inner_w);

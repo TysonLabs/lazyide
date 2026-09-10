@@ -540,7 +540,6 @@ impl KeyBindings {
         bind(KeyAction::TreeCollapseAll, "ctrl+shift+c");
         bind(KeyAction::TreeExpandRecursive, "shift+right");
         bind(KeyAction::TreeCollapseRecursive, "shift+left");
-        bind(KeyAction::GitDiff, "ctrl+shift+g");
         bind(KeyAction::GitDiff, "f5");
 
         // Editor
