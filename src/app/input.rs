@@ -262,8 +262,8 @@ impl App {
             return Ok(());
         }
 
-        // Tab bar click detection (title bar row of editor block)
-        if mouse.row == self.editor_rect.y && inside(mouse.column, mouse.row, self.editor_rect) {
+        // Tab bar click detection (its own row above the editor block)
+        if inside(mouse.column, mouse.row, self.tab_bar_rect) {
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     for (i, (name_rect, close_rect)) in self.tab_rects.iter().enumerate() {

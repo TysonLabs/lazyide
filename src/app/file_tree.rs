@@ -208,6 +208,7 @@ impl App {
 
     pub(crate) fn set_status<S: Into<String>>(&mut self, status: S) {
         self.status = status.into();
+        self.status_set_at = Some(std::time::Instant::now());
     }
 
     pub(crate) fn refresh_file_picker_results(&mut self) {

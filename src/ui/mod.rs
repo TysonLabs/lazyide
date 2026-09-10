@@ -1,5 +1,6 @@
 mod helpers;
 mod overlays;
+mod status_bar;
 
 #[cfg(test)]
 pub(crate) use helpers::centered_rect;
@@ -10,19 +11,16 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap,
-};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
-use crate::keybinds::KeyAction;
 use crate::lsp_client::LspDiagnostic;
 use crate::syntax::{highlight_line, syntax_lang_for_path};
 use crate::tab::{FoldRange, GitLineStatus};
 use crate::types::Focus;
 use crate::types::PendingAction;
-use crate::util::{relative_path, segment_has_selection};
+use crate::util::segment_has_selection;
 use helpers::{apply_indent_guides, apply_selection_to_spans, clip_spans_by_columns};
 use overlays::*;
 
@@ -61,36 +59,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     app.tree_rect = tree_area.unwrap_or_default();
     app.editor_rect = editor_area;
 
-    let file_label = match app.open_path() {
-        Some(path) => {
-            let mut s = relative_path(&app.root, path).display().to_string();
-            if app.is_dirty() {
-                s.push_str(" *");
-            }
-            s
-        }
-        None => "no file".to_string(),
-    };
-    let branch_label = app.git_branch.as_deref().unwrap_or("");
-    let git_label = if branch_label.is_empty() {
-        String::new()
-    } else if app.git_change_summary.is_clean() {
-        format!("   git: {}", branch_label)
-    } else {
-        format!(
-            "   git: {}   Δ: {} files +{} -{}",
-            branch_label,
-            app.git_change_summary.files_changed,
-            app.git_change_summary.insertions,
-            app.git_change_summary.deletions
-        )
-    };
-    let top_text = format!(
-        "lazyide   root: {}   file: {}{}",
-        app.root.display(),
-        file_label,
-        git_label
-    );
+    let top_text = format!("lazyide   root: {}", app.root.display());
     let top = Paragraph::new(top_text)
         .style(Style::default().fg(theme.fg).bg(theme.bg_alt))
         .block(
@@ -179,50 +148,29 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         }
     }
 
-    // Build tab bar title
-    let tab_title: Line = if app.tabs.is_empty() {
-        Line::from("Working View")
-    } else {
-        let mut spans = Vec::new();
-        app.tab_rects.clear();
-        for (i, tab) in app.tabs.iter().enumerate() {
-            let fname = tab
-                .path
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_else(|| "untitled".to_string());
-            let prefix = if tab.dirty { "*" } else { "" };
-            let label = format!(" {prefix}{fname} [x] ");
-            let style = if i == app.active_tab {
-                let mut s = Style::default().fg(theme.fg).bg(theme.bg);
-                if tab.is_preview {
-                    s = s.add_modifier(Modifier::ITALIC);
-                }
-                s
-            } else {
-                let mut s = Style::default().fg(theme.fg_muted);
-                if tab.is_preview {
-                    s = s.add_modifier(Modifier::ITALIC);
-                }
-                s
-            };
-            if !spans.is_empty() {
-                spans.push(Span::styled("│", Style::default().fg(theme.border)));
-            }
-            spans.push(Span::styled(label, style));
-        }
-        Line::from(spans)
-    };
+    // Tab bar gets its own row above the editor block.
+    let editor_column = editor_area;
+    let tab_row = Rect::new(editor_column.x, editor_column.y, editor_column.width, 1);
+    let editor_area = Rect::new(
+        editor_column.x,
+        editor_column.y.saturating_add(1),
+        editor_column.width,
+        editor_column.height.saturating_sub(1),
+    );
+    app.tab_bar_rect = tab_row;
+    app.editor_rect = editor_area;
+    render_tab_bar(app, frame, tab_row, &theme);
+
     let editor_block = Block::default()
-        .title(tab_title)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(right_border))
         .style(Style::default().bg(theme.bg_alt).fg(theme.fg));
     frame.render_widget(editor_block, editor_area);
     if app.files_view_open && app.divider_rect.width > 0 {
-        // Redraw the shared border column as a proper split: T-junctions at the
-        // top and bottom, colored for whichever pane has focus.
+        // Redraw the shared border column as a proper split: the tree's corner
+        // beside the tab row, a junction where the editor's top border meets it,
+        // and a junction at the bottom. Colored for whichever pane has focus.
         let color = if app.focus == Focus::Tree {
             theme.accent
         } else {
@@ -233,7 +181,9 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         let buf = frame.buffer_mut();
         for y in d.y..d.bottom() {
             let sym = if y == d.y {
-                "┬"
+                "╮"
+            } else if y == d.y.saturating_add(1) {
+                "├"
             } else if y + 1 == d.bottom() {
                 "┴"
             } else {
@@ -243,42 +193,6 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         }
     }
     let inner = app.editor_inner_rect();
-
-    // Compute tab_rects for click detection (position within the title bar)
-    {
-        app.tab_rects.clear();
-        let mut x_offset = editor_area.x + 1; // +1 for border
-        for (i, tab) in app.tabs.iter().enumerate() {
-            let fname = tab
-                .path
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_else(|| "untitled".to_string());
-            let prefix = if tab.dirty { "*" } else { "" };
-            let label_text = format!(" {prefix}{fname} [x] ");
-            let label_len = label_text.width() as u16;
-            if i > 0 {
-                x_offset += 1; // separator
-            }
-            // Name rect (clickable to switch)
-            let close_len = 4u16; // " [x]" + trailing space
-            let name_rect = Rect::new(
-                x_offset,
-                editor_area.y,
-                label_len.saturating_sub(close_len),
-                1,
-            );
-            // Close rect
-            let close_rect = Rect::new(
-                x_offset + label_len.saturating_sub(close_len),
-                editor_area.y,
-                close_len,
-                1,
-            );
-            app.tab_rects.push((name_rect, close_rect));
-            x_offset += label_len;
-        }
-    }
 
     frame.render_widget(Clear, inner);
     let wrap_width = inner.width.saturating_sub(App::EDITOR_GUTTER_WIDTH) as usize;
@@ -700,28 +614,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         }
     }
 
-    let kb = &app.keybinds;
-    let status = Paragraph::new(format!(
-        "{} Cmd   {} Open   {} Help   {} Files   {} Close   {} Save   {} Quit   {} Wrap:{}",
-        kb.display_for(KeyAction::CommandPalette),
-        kb.display_for(KeyAction::QuickOpen),
-        kb.display_for(KeyAction::Help),
-        kb.display_for(KeyAction::ToggleFiles),
-        kb.display_for(KeyAction::CloseTab),
-        kb.display_for(KeyAction::Save),
-        kb.display_for(KeyAction::Quit),
-        kb.display_for(KeyAction::ToggleWordWrap),
-        if app.word_wrap { "on" } else { "off" },
-    ))
-    .style(Style::default().fg(theme.fg).bg(theme.bg_alt))
-    .wrap(Wrap { trim: true })
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme.border)),
-    );
-    frame.render_widget(status, vertical[2]);
+    status_bar::render_status_bar(&*app, frame, vertical[2]);
 
     if app.menu_open {
         render_menu(app, frame);
@@ -765,4 +658,52 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     if app.active_tab().is_some_and(|t| t.recovery_prompt_open) {
         render_recovery_prompt(app, frame);
     }
+}
+
+/// One-row tab strip. Column 0 is left blank so labels line up with the
+/// editor's left border (or the shared divider) below it.
+fn render_tab_bar(app: &mut App, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
+    app.tab_rects.clear();
+    let base = Style::default().bg(theme.bg_alt);
+    let mut spans: Vec<Span> = vec![Span::styled(" ", base)];
+    let mut x = area.x.saturating_add(1);
+    if app.tabs.is_empty() {
+        spans.push(Span::styled(" Working View", base.fg(theme.fg_muted)));
+    }
+    for (i, tab) in app.tabs.iter().enumerate() {
+        let fname = tab
+            .path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "untitled".to_string());
+        let marker = if tab.dirty { "● " } else { "" };
+        let name_text = format!(" {marker}{fname} ");
+        let close_text = "× ";
+        let active = i == app.active_tab;
+        let mut name_style = if active {
+            base.fg(theme.accent)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            base.fg(theme.fg_muted)
+        };
+        if tab.is_preview {
+            name_style = name_style.add_modifier(Modifier::ITALIC);
+        }
+        let close_style = if active {
+            base.fg(theme.accent)
+        } else {
+            base.fg(theme.fg_muted)
+        };
+        let name_w = name_text.width() as u16;
+        let close_w = close_text.width() as u16;
+        app.tab_rects.push((
+            Rect::new(x, area.y, name_w, 1),
+            Rect::new(x.saturating_add(name_w), area.y, close_w, 1),
+        ));
+        spans.push(Span::styled(name_text, name_style));
+        spans.push(Span::styled(close_text, close_style));
+        spans.push(Span::styled(" ", base));
+        x = x.saturating_add(name_w + close_w + 1);
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }

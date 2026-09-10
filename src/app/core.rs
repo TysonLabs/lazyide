@@ -57,6 +57,7 @@ impl App {
             active_tab: 0,
             last_tree_click: None,
             status: String::new(),
+            status_set_at: None,
             pending: PendingAction::None,
             quit: false,
             files_view_open: true,
@@ -80,6 +81,7 @@ impl App {
             editor_rect: Rect::default(),
             divider_rect: Rect::default(),
             tab_rects: Vec::new(),
+            tab_bar_rect: Rect::default(),
             context_menu: ContextMenuState {
                 open: false,
                 index: 0,
