@@ -1342,7 +1342,7 @@ mod fold_and_selection_tests {
     fn test_visible_rows_map_excludes_folded_lines() {
         // Simulate a 7-line file with lines 1-2 folded (fold starting at line 0)
         let lines: Vec<String> = (0..7).map(|i| format!("line {i}")).collect();
-        let fold_ranges = vec![FoldRange {
+        let fold_ranges = [FoldRange {
             start_line: 0,
             end_line: 2,
         }];
@@ -1779,7 +1779,7 @@ mod indent_depth_tests {
     #[test]
     fn test_blank_line_depth_propagation_simple() {
         // Simulate the two-pass algorithm from draw()
-        let lines = vec!["    a", "", "    b"];
+        let lines = ["    a", "", "    b"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1819,7 +1819,7 @@ mod indent_depth_tests {
     #[test]
     fn test_blank_line_depth_min_of_neighbors() {
         // Blank line between different depths picks the minimum
-        let lines = vec!["        a", "", "    b"];
+        let lines = ["        a", "", "    b"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1860,7 +1860,7 @@ mod indent_depth_tests {
 
     #[test]
     fn test_consecutive_blank_lines_propagate() {
-        let lines = vec!["    a", "", "", "", "    b"];
+        let lines = ["    a", "", "", "", "    b"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1900,7 +1900,7 @@ mod indent_depth_tests {
 
     #[test]
     fn test_blank_lines_at_start_use_below() {
-        let lines = vec!["", "", "    code"];
+        let lines = ["", "", "    code"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
@@ -1940,7 +1940,7 @@ mod indent_depth_tests {
 
     #[test]
     fn test_no_blank_lines() {
-        let lines = vec!["a", "    b", "        c"];
+        let lines = ["a", "    b", "        c"];
         let total = lines.len();
         let mut depths = vec![0usize; total];
         let mut is_blank = vec![false; total];
