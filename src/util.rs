@@ -751,9 +751,15 @@ pub(crate) fn normalize_lexically(path: &Path) -> PathBuf {
         match comp {
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                // Above an absolute root, `..` is a no-op; for relative paths keep it.
-                if !out.pop() && !out.has_root() {
-                    out.push(comp);
+                // Only a normal component can be cancelled. Above an absolute
+                // root `..` is a no-op; leading `..` on a relative path accumulate.
+                match out.components().next_back() {
+                    Some(std::path::Component::Normal(_)) => {
+                        out.pop();
+                    }
+                    Some(std::path::Component::RootDir) | Some(std::path::Component::Prefix(_)) => {
+                    }
+                    _ => out.push(comp),
                 }
             }
             other => out.push(other),
@@ -787,6 +793,14 @@ mod path_tests {
         assert_eq!(
             normalize_lexically(Path::new("rel/./x/..")),
             PathBuf::from("rel")
+        );
+        assert_eq!(
+            normalize_lexically(Path::new("../../x")),
+            PathBuf::from("../../x")
+        );
+        assert_eq!(
+            normalize_lexically(Path::new("a/../../b")),
+            PathBuf::from("../b")
         );
     }
 }

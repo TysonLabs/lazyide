@@ -497,9 +497,16 @@ impl App {
                 };
                 let moved = dest_dir.join(name);
                 // symlink_metadata also catches dangling symlinks, which exists() misses.
-                if fs::symlink_metadata(&moved).is_ok() {
-                    self.set_status("Destination already has an item with that name");
-                    return Ok(());
+                match fs::symlink_metadata(&moved) {
+                    Ok(_) => {
+                        self.set_status("Destination already has an item with that name");
+                        return Ok(());
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                    Err(err) => {
+                        self.set_status(format!("Cannot check destination: {err}"));
+                        return Ok(());
+                    }
                 }
                 if let Err(err) = fs::rename(&target, &moved) {
                     self.set_status(format!("Move failed: {err}"));
