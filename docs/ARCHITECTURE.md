@@ -18,7 +18,8 @@ src/
     lsp.rs             LSP lifecycle, completion, diagnostics, go-to-definition
     search.rs          Find/replace in file, project search (ripgrep)
   ui/
-    mod.rs             Main draw() function (layout, tree pane, editor pane, bars)
+    mod.rs             Main draw() function (layout, tree pane, tab row, editor pane)
+    status_bar.rs      Structured status bar (mode, branch, breadcrumbs, cursor, diagnostics)
     overlays.rs        Overlays: command palette, theme browser, help, prompts, etc.
     helpers.rs         UI utilities (centered_rect, label helpers, indent guides, horizontal span clipping)
   keybinds.rs          KeyAction enum, KeyBind, KeyBindings, JSON load/save
@@ -77,12 +78,13 @@ Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling 
 2. Main split     If file tree open: [tree | editor], else [editor]. The editor's
                   left border doubles as the draggable divider and is redrawn
                   with ┬/┴ junctions in the focused pane's color.
-3. Top bar        "lazyide  root: ...  file: ...  git: branch  Δ: ~M +A ?U"
-                  Git change summary shown when repo has uncommitted changes
+3. Top bar        "lazyide  root: ..." (branch and file live in the status bar)
 4. File tree      ListWidget with TreeItem names, indent by depth
                   Files colored by git status (theme git_modified/git_added,
                   untracked=muted), directories inherit highest child status
-5. Tab bar        Horizontal tab names with click rects, [x] close buttons
+5. Tab bar        Its own row above the editor block: active tab underlined in
+                  the accent color, × close buttons, ● dirty marker, click rects
+                  stored in app.tab_rects / app.tab_bar_rect
 6. Editor         Line-by-line rendering inside a 1-char horizontal padding
                   (App::editor_inner_rect), 11-char gutter:
                     - Line number (5 chars)
@@ -94,7 +96,9 @@ Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling 
                     - Horizontal scroll clipping (when word wrap off, via clip_spans_by_columns)
                     - Cursor row highlight, selection highlight
                     - Fold summary ("... [N lines]")
-7. Status bar     Dynamic keybind hints + status message + cursor position
+7. Status bar     ui/status_bar.rs — left: focus chip + git branch +/-; center:
+                  status message (5s TTL) > breadcrumbs of open file > keybind
+                  hints; right: Ln/Col, ● errors ▲ warnings, UTF-8, Wrap
 8. Overlays       Modals rendered last (on top): menus, prompts, help, etc.
                   Each gets a 1-cell drop shadow (helpers::clear_with_shadow).
 ```
@@ -149,7 +153,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-278 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+280 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
 
 ## Adding a New Feature
 
