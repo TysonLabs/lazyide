@@ -5,7 +5,9 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::tree_item::TreeItem;
 use crate::types::{ContextAction, PendingAction, PromptMode, PromptState};
-use crate::util::{collect_all_files, fuzzy_score, relative_path, to_u16_saturating};
+use crate::util::{
+    collect_all_files, fuzzy_score, normalize_lexically, relative_path, to_u16_saturating,
+};
 
 impl App {
     fn sanitize_entry_name<'a>(&self, value: &'a str) -> Result<&'a str, &'static str> {
@@ -18,6 +20,44 @@ impl App {
             (Some(Component::Normal(_)), None) => Ok(trimmed),
             _ => Err("Name must be a single path component"),
         }
+    }
+
+    /// Resolve the user-entered destination folder for a move. Relative paths
+    /// are taken from the project root; absolute paths are allowed so items can
+    /// leave the project. The returned path is lexically normalized but NOT
+    /// canonicalized, so it stays comparable with `self.root` and tree paths
+    /// (the root itself may sit behind a symlink, e.g. macOS `/var`).
+    fn resolve_move_destination(&self, target: &Path, value: &str) -> Result<PathBuf, String> {
+        let trimmed = value.trim();
+        let raw = if trimmed.is_empty() || trimmed == "." {
+            self.root.clone()
+        } else {
+            self.root.join(trimmed)
+        };
+        let dest = normalize_lexically(&raw);
+        if !dest.is_dir() {
+            return Err(if dest.exists() {
+                "Destination is not a folder".to_string()
+            } else {
+                "Destination folder does not exist".to_string()
+            });
+        }
+        // Canonical forms are used only for identity comparisons.
+        let dest_canon = dest.canonicalize().unwrap_or_else(|_| dest.clone());
+        let current_parent = target
+            .parent()
+            .and_then(|p| p.canonicalize().ok())
+            .unwrap_or_else(|| self.root.clone());
+        if dest_canon == current_parent {
+            return Err("Already in that folder".to_string());
+        }
+        if target.is_dir()
+            && let Ok(target_canon) = target.canonicalize()
+            && dest_canon.starts_with(&target_canon)
+        {
+            return Err("Cannot move a folder into itself".to_string());
+        }
+        Ok(dest)
     }
 
     fn close_tabs_for_path_prefix(&mut self, path: &Path) {
@@ -443,6 +483,58 @@ impl App {
                     relative_path(&self.root, &renamed).display()
                 ));
             }
+            PromptMode::Move { target } => {
+                let dest_dir = match self.resolve_move_destination(&target, &value) {
+                    Ok(dir) => dir,
+                    Err(msg) => {
+                        self.set_status(msg);
+                        return Ok(());
+                    }
+                };
+                let Some(name) = target.file_name() else {
+                    self.set_status("Cannot move root");
+                    return Ok(());
+                };
+                let moved = dest_dir.join(name);
+                // symlink_metadata also catches dangling symlinks, which exists() misses.
+                match fs::symlink_metadata(&moved) {
+                    Ok(_) => {
+                        self.set_status("Destination already has an item with that name");
+                        return Ok(());
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                    Err(err) => {
+                        self.set_status(format!("Cannot check destination: {err}"));
+                        return Ok(());
+                    }
+                }
+                if let Err(err) = fs::rename(&target, &moved) {
+                    self.set_status(format!("Move failed: {err}"));
+                    return Ok(());
+                }
+                self.retarget_tabs_for_rename(&target, &moved);
+                self.retarget_expanded_for_rename(&target, &moved);
+                // Reveal the destination: expand every ancestor inside the project.
+                for dir in dest_dir.ancestors() {
+                    if dir == self.root || !dir.starts_with(&self.root) {
+                        break;
+                    }
+                    self.expanded.insert(dir.to_path_buf());
+                }
+                let prev_selected = self.selected;
+                self.rebuild_tree()?;
+                // Select the moved item; if it left the project, stay near where we were.
+                self.selected = self
+                    .tree
+                    .iter()
+                    .position(|i| i.path == moved)
+                    .unwrap_or_else(|| prev_selected.min(self.tree.len().saturating_sub(1)));
+                self.set_status(format!(
+                    "Moved {} to {}",
+                    name.to_string_lossy(),
+                    relative_path(&self.root, &dest_dir).display()
+                ));
+            }
             PromptMode::FindInFile => {
                 self.search_in_open_file(&value);
                 if self.replace_after_find && !value.is_empty() {
@@ -547,6 +639,21 @@ impl App {
                     value: default_name,
                     cursor,
                     mode: PromptMode::Rename { target },
+                });
+            }
+            ContextAction::Move => {
+                if target == self.root {
+                    self.set_status("Cannot move project root");
+                    return Ok(());
+                }
+                let parent = target.parent().unwrap_or(&self.root);
+                let default_dir = relative_path(&self.root, parent).display().to_string();
+                let cursor = default_dir.len();
+                self.prompt = Some(PromptState {
+                    title: "Move to folder (relative to project root)".to_string(),
+                    value: default_dir,
+                    cursor,
+                    mode: PromptMode::Move { target },
                 });
             }
             ContextAction::Delete => {
@@ -660,6 +767,105 @@ mod tests {
         assert!(app.tabs.iter().any(|t| t.path == new_b));
         assert!(!app.tabs.iter().any(|t| t.path == old_a));
         assert!(!app.tabs.iter().any(|t| t.path == old_b));
+    }
+
+    #[test]
+    fn move_file_into_subdir_retargets_tab_and_selects_it() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path().to_path_buf();
+        let file = root.join("a.rs");
+        fs::write(&file, "fn a() {}\n").expect("write a");
+        fs::create_dir_all(root.join("src/app")).expect("create dirs");
+
+        let mut app = new_app(&root);
+        app.open_file(file.clone()).expect("open a");
+
+        app.apply_prompt(
+            PromptMode::Move {
+                target: file.clone(),
+            },
+            "src/app".to_string(),
+        )
+        .expect("move file");
+
+        let moved = root.join("src/app/a.rs");
+        assert!(moved.exists());
+        assert!(!file.exists());
+        assert!(app.tabs.iter().any(|t| t.path == moved));
+        assert!(app.expanded.contains(&root.join("src/app")));
+        assert_eq!(app.tree[app.selected].path, moved);
+        assert_eq!(app.status, "Moved a.rs to src/app");
+    }
+
+    #[test]
+    fn move_rejects_folder_into_itself_and_missing_destination() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path().to_path_buf();
+        let dir = root.join("pkg");
+        fs::create_dir_all(dir.join("inner")).expect("create dirs");
+        let mut app = new_app(&root);
+
+        app.apply_prompt(
+            PromptMode::Move {
+                target: dir.clone(),
+            },
+            "pkg/inner".to_string(),
+        )
+        .expect("non-fatal");
+        assert_eq!(app.status, "Cannot move a folder into itself");
+        assert!(dir.is_dir());
+
+        app.apply_prompt(
+            PromptMode::Move {
+                target: dir.clone(),
+            },
+            "nowhere".to_string(),
+        )
+        .expect("non-fatal");
+        assert_eq!(app.status, "Destination folder does not exist");
+
+        app.apply_prompt(
+            PromptMode::Move {
+                target: dir.clone(),
+            },
+            ".".to_string(),
+        )
+        .expect("non-fatal");
+        assert_eq!(app.status, "Already in that folder");
+    }
+
+    #[test]
+    fn move_rejects_name_collision_and_allows_leaving_project() {
+        let tmp = tempdir().expect("tempdir");
+        let base = tmp.path().to_path_buf();
+        let root = base.join("proj");
+        let outside = base.join("outside");
+        fs::create_dir_all(root.join("dst")).expect("create");
+        fs::create_dir_all(&outside).expect("create");
+        fs::write(root.join("x.txt"), "1").expect("write");
+        fs::write(root.join("dst/x.txt"), "2").expect("write");
+        let mut app = new_app(&root);
+
+        app.apply_prompt(
+            PromptMode::Move {
+                target: root.join("x.txt"),
+            },
+            "dst".to_string(),
+        )
+        .expect("non-fatal");
+        assert_eq!(app.status, "Destination already has an item with that name");
+        assert!(root.join("x.txt").exists());
+
+        app.apply_prompt(
+            PromptMode::Move {
+                target: root.join("x.txt"),
+            },
+            outside.display().to_string(),
+        )
+        .expect("move outside");
+        assert!(outside.join("x.txt").exists());
+        assert!(!root.join("x.txt").exists());
+        assert!(app.selected < app.tree.len());
     }
 
     #[test]

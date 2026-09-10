@@ -149,7 +149,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 
 - Click file/folder in tree to open
 - Drag divider to resize panes
-- Right-click tree for context menu (New File, Rename, Delete)
+- Right-click tree for context menu (New File, New Folder, Rename, Move to, Delete)
 - Click + drag in editor to select text
 - Right-click editor for edit menu
 - Click gutter fold icons to toggle folds
