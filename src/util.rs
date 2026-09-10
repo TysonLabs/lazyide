@@ -68,12 +68,13 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
     }
 }
 
-pub(crate) fn context_actions() -> [ContextAction; 6] {
+pub(crate) fn context_actions() -> [ContextAction; 7] {
     [
         ContextAction::Open,
         ContextAction::NewFile,
         ContextAction::NewFolder,
         ContextAction::Rename,
+        ContextAction::Move,
         ContextAction::Delete,
         ContextAction::Cancel,
     ]
@@ -95,6 +96,7 @@ pub(crate) fn context_label(action: ContextAction) -> &'static str {
         ContextAction::NewFile => "New File",
         ContextAction::NewFolder => "New Folder",
         ContextAction::Rename => "Rename",
+        ContextAction::Move => "Move to...",
         ContextAction::Delete => "Delete",
         ContextAction::Cancel => "Cancel",
     }

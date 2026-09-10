@@ -19,6 +19,7 @@ pub(crate) enum PromptMode {
     NewFile { parent: PathBuf },
     NewFolder { parent: PathBuf },
     Rename { target: PathBuf },
+    Move { target: PathBuf },
     FindInFile,
     FindInProject,
     ReplaceInFile { search: String },
@@ -56,6 +57,7 @@ pub(crate) enum ContextAction {
     NewFile,
     NewFolder,
     Rename,
+    Move,
     Delete,
     Cancel,
 }
