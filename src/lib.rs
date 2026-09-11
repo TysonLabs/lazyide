@@ -18,6 +18,7 @@ mod app;
 mod diff;
 mod keybinds;
 mod lsp_client;
+mod minimap;
 mod persistence;
 mod syntax;
 mod tab;

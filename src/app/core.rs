@@ -2,6 +2,7 @@ use super::{
     App, CompletionState, ContextMenuState, DiffViewState, KeybindEditorState, SearchResultsState,
     SplitDirection,
 };
+use crate::minimap::{MINIMAP_MIN_PANE_WIDTH, MINIMAP_WIDTH, centered_scroll, lines_per_row};
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -92,6 +93,8 @@ impl App {
             split_divider_rect: Rect::default(),
             split_dragging: false,
             editor_column_rect: Rect::default(),
+            minimap_enabled: true,
+            minimap_dragging: false,
             context_menu: ContextMenuState {
                 open: false,
                 index: 0,
@@ -389,6 +392,9 @@ impl App {
         if let Some(word_wrap) = saved.word_wrap {
             self.word_wrap = word_wrap;
         }
+        if let Some(minimap) = saved.minimap {
+            self.minimap_enabled = minimap;
+        }
         if let Some(width) = saved.files_pane_width {
             self.files_pane_width = width.max(Self::MIN_FILES_PANE_WIDTH);
         }
@@ -408,6 +414,7 @@ impl App {
             theme_name: self.active_theme().name.clone(),
             files_pane_width: Some(self.files_pane_width),
             word_wrap: Some(self.word_wrap),
+            minimap: Some(self.minimap_enabled),
         };
         if save_persisted_state(&state).is_err() {
             self.set_status("Failed to persist app state");
@@ -503,6 +510,7 @@ impl App {
             CommandAction::FocusOtherPane,
             CommandAction::MoveTabToOtherPane,
             CommandAction::ClosePane,
+            CommandAction::ToggleMinimap,
         ];
         let q = self.menu_query.to_ascii_lowercase();
         self.menu_results = all
@@ -578,6 +586,7 @@ impl App {
             CommandAction::FocusOtherPane => self.focus_other_pane(),
             CommandAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
             CommandAction::ClosePane => self.close_pane(),
+            CommandAction::ToggleMinimap => self.toggle_minimap(),
         }
         Ok(())
     }
@@ -753,15 +762,81 @@ impl App {
         }
     }
 
-    /// Content area of the editor: inside the border and horizontal padding.
+    /// Content area of the editor: inside the border and horizontal padding,
+    /// minus the minimap column when it is shown.
     pub(crate) fn editor_inner_rect(&self) -> Rect {
         let r = self.editor_rect;
+        let minimap_cols = if self.minimap_shown() {
+            MINIMAP_WIDTH + 1
+        } else {
+            0
+        };
         Rect::new(
             r.x.saturating_add(1 + Self::EDITOR_PAD_X),
             r.y.saturating_add(1),
-            r.width.saturating_sub(2 + 2 * Self::EDITOR_PAD_X),
+            r.width
+                .saturating_sub(2 + 2 * Self::EDITOR_PAD_X)
+                .saturating_sub(minimap_cols),
             r.height.saturating_sub(2),
         )
+    }
+
+    /// The minimap is drawn when enabled and the pane is wide enough.
+    pub(crate) fn minimap_shown(&self) -> bool {
+        self.minimap_enabled && self.editor_rect.width >= MINIMAP_MIN_PANE_WIDTH
+    }
+
+    /// Screen rect of the minimap column inside the editor border.
+    pub(crate) fn minimap_rect(&self) -> Option<Rect> {
+        if !self.minimap_shown() {
+            return None;
+        }
+        let r = self.editor_rect;
+        let x = r
+            .right()
+            .saturating_sub(1 + Self::EDITOR_PAD_X + MINIMAP_WIDTH);
+        Some(Rect::new(
+            x,
+            r.y.saturating_add(1),
+            MINIMAP_WIDTH,
+            r.height.saturating_sub(2),
+        ))
+    }
+
+    pub(crate) fn toggle_minimap(&mut self) {
+        self.minimap_enabled = !self.minimap_enabled;
+        self.wrap_width_cache = 0;
+        self.rebuild_all_visible_rows_all_panes();
+        self.sync_editor_scroll_guess();
+        self.persist_state();
+        self.set_status(if self.minimap_enabled {
+            "Minimap shown"
+        } else {
+            "Minimap hidden"
+        });
+    }
+
+    /// Scroll so the source lines summarized by minimap row `row` are centered.
+    pub(crate) fn scroll_to_minimap_row(&mut self, row: usize) {
+        let Some(tab) = self.active_tab() else {
+            return;
+        };
+        let height = self.minimap_rect().map(|r| r.height as usize).unwrap_or(0);
+        if height == 0 {
+            return;
+        }
+        let lpr = lines_per_row(tab.editor.lines().len(), height);
+        let target_line = (row * lpr).min(tab.editor.lines().len().saturating_sub(1));
+        if tab.visible_rows_map.is_empty() {
+            self.rebuild_visible_rows();
+        }
+        let target_visible = self.visible_index_of_source_row(target_line);
+        let viewport_h = self.editor_inner_rect().height as usize;
+        let Some(tab) = self.active_tab_mut() else {
+            return;
+        };
+        tab.editor_scroll_row =
+            centered_scroll(target_visible, viewport_h, tab.visible_rows_map.len());
     }
 
     fn editor_wrap_width_chars(&self) -> usize {

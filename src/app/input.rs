@@ -344,6 +344,30 @@ impl App {
                 MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
             );
         if inside(mouse.column, mouse.row, self.editor_rect) || scroll_over_tabs {
+            // Minimap: click or drag to scroll the editor to that region.
+            if let Some(mm) = self.minimap_rect() {
+                let in_minimap = inside(mouse.column, mouse.row, mm);
+                match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) if in_minimap => {
+                        self.focus = Focus::Editor;
+                        self.minimap_dragging = true;
+                        self.scroll_to_minimap_row(mouse.row.saturating_sub(mm.y) as usize);
+                        return Ok(());
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Moved
+                        if self.minimap_dragging =>
+                    {
+                        let row = mouse.row.clamp(mm.y, mm.bottom().saturating_sub(1));
+                        self.scroll_to_minimap_row((row - mm.y) as usize);
+                        return Ok(());
+                    }
+                    MouseEventKind::Up(MouseButton::Left) if self.minimap_dragging => {
+                        self.minimap_dragging = false;
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     self.focus = Focus::Editor;
