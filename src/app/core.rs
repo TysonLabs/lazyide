@@ -1,5 +1,6 @@
 use super::{
     App, CompletionState, ContextMenuState, DiffViewState, KeybindEditorState, SearchResultsState,
+    SplitDirection,
 };
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
@@ -84,6 +85,13 @@ impl App {
             divider_rect: Rect::default(),
             tab_rects: Vec::new(),
             tab_bar_rect: Rect::default(),
+            split: None,
+            other_pane: None,
+            focused_pane_first: true,
+            split_ratio: Self::DEFAULT_SPLIT_RATIO,
+            split_divider_rect: Rect::default(),
+            split_dragging: false,
+            editor_column_rect: Rect::default(),
             context_menu: ContextMenuState {
                 open: false,
                 index: 0,
@@ -269,8 +277,7 @@ impl App {
                 }
                 let root = self.root.clone();
                 let tab_paths: Vec<(PathBuf, usize)> = self
-                    .tabs
-                    .iter()
+                    .all_tabs()
                     .map(|tab| (tab.path.clone(), tab.editor.lines().len()))
                     .collect();
                 let (tx, rx) = mpsc::channel();
@@ -299,7 +306,7 @@ impl App {
         self.git_file_statuses = result.file_statuses;
         self.git_change_summary = result.change_summary;
         for (path, line_status) in result.line_statuses {
-            if let Some(tab) = self.tabs.iter_mut().find(|t| t.path == path) {
+            if let Some(tab) = self.all_tabs_mut().find(|t| t.path == path) {
                 tab.git_line_status = line_status;
             }
         }
@@ -357,7 +364,7 @@ impl App {
     }
 
     pub(crate) fn any_tab_dirty(&self) -> bool {
-        self.tabs.iter().any(|t| t.dirty)
+        self.all_tabs().any(|t| t.dirty)
     }
 
     pub(crate) fn mark_dirty(&mut self) {
@@ -415,12 +422,12 @@ impl App {
         self.word_wrap = !self.word_wrap;
         if self.word_wrap {
             // Reset horizontal scroll for all tabs when wrapping takes over
-            for tab in &mut self.tabs {
+            for tab in self.all_tabs_mut() {
                 tab.editor_scroll_col = 0;
             }
         }
         self.wrap_width_cache = self.editor_wrap_width_chars();
-        self.rebuild_all_visible_rows();
+        self.rebuild_all_visible_rows_all_panes();
         self.sync_editor_scroll_guess();
         self.persist_state();
         if self.word_wrap {
@@ -491,6 +498,11 @@ impl App {
             CommandAction::Keybinds,
             CommandAction::ToggleWordWrap,
             CommandAction::GitDiff,
+            CommandAction::SplitVertical,
+            CommandAction::SplitHorizontal,
+            CommandAction::FocusOtherPane,
+            CommandAction::MoveTabToOtherPane,
+            CommandAction::ClosePane,
         ];
         let q = self.menu_query.to_ascii_lowercase();
         self.menu_results = all
@@ -561,6 +573,11 @@ impl App {
             }
             CommandAction::ToggleWordWrap => self.toggle_word_wrap(),
             CommandAction::GitDiff => self.open_diff_view(),
+            CommandAction::SplitVertical => self.split_pane(SplitDirection::Vertical),
+            CommandAction::SplitHorizontal => self.split_pane(SplitDirection::Horizontal),
+            CommandAction::FocusOtherPane => self.focus_other_pane(),
+            CommandAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
+            CommandAction::ClosePane => self.close_pane(),
         }
         Ok(())
     }
@@ -581,7 +598,7 @@ impl App {
         if self.autosave_last_write.elapsed() < Duration::from_millis(Self::AUTOSAVE_INTERVAL_MS) {
             return Ok(());
         }
-        for tab in &self.tabs {
+        for tab in self.all_tabs() {
             if !tab.dirty {
                 continue;
             }
@@ -732,7 +749,7 @@ impl App {
             && Instant::now() >= deadline
         {
             self.wrap_rebuild_deadline = None;
-            self.rebuild_all_visible_rows();
+            self.rebuild_all_visible_rows_all_panes();
         }
     }
 

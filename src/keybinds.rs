@@ -33,6 +33,11 @@ pub(crate) enum KeyAction {
     TreeExpandRecursive,
     TreeCollapseRecursive,
     GitDiff,
+    SplitVertical,
+    SplitHorizontal,
+    FocusOtherPane,
+    MoveTabToOtherPane,
+    ClosePane,
     // Editor
     GoToDefinition,
     FoldToggle,
@@ -88,6 +93,11 @@ impl KeyAction {
                 | KeyAction::TreeExpandRecursive
                 | KeyAction::TreeCollapseRecursive
                 | KeyAction::GitDiff
+                | KeyAction::SplitVertical
+                | KeyAction::SplitHorizontal
+                | KeyAction::FocusOtherPane
+                | KeyAction::MoveTabToOtherPane
+                | KeyAction::ClosePane
         )
     }
 
@@ -107,6 +117,11 @@ impl KeyAction {
             KeyAction::FindReplace => "Find & Replace",
             KeyAction::SearchFiles => "Search Files",
             KeyAction::GitDiff => "Git Diff",
+            KeyAction::SplitVertical => "Split Vertical",
+            KeyAction::SplitHorizontal => "Split Horizontal",
+            KeyAction::FocusOtherPane => "Focus Other Pane",
+            KeyAction::MoveTabToOtherPane => "Move Tab to Other Pane",
+            KeyAction::ClosePane => "Close Pane",
             KeyAction::GitNextChange => "Next Change",
             KeyAction::GitPrevChange => "Previous Change",
             KeyAction::GoToLine => "Go to Line",
@@ -171,6 +186,11 @@ impl KeyAction {
             KeyAction::TreeExpandRecursive,
             KeyAction::TreeCollapseRecursive,
             KeyAction::GitDiff,
+            KeyAction::SplitVertical,
+            KeyAction::SplitHorizontal,
+            KeyAction::FocusOtherPane,
+            KeyAction::MoveTabToOtherPane,
+            KeyAction::ClosePane,
             KeyAction::GoToDefinition,
             KeyAction::FoldToggle,
             KeyAction::FoldAllToggle,
@@ -597,6 +617,11 @@ impl KeyBindings {
         bind(KeyAction::TreeExpandRecursive, "shift+right");
         bind(KeyAction::TreeCollapseRecursive, "shift+left");
         bind(KeyAction::GitDiff, "f5");
+        bind(KeyAction::SplitVertical, "alt+v");
+        bind(KeyAction::SplitHorizontal, "alt+s");
+        bind(KeyAction::FocusOtherPane, "alt+w");
+        bind(KeyAction::MoveTabToOtherPane, "alt+m");
+        bind(KeyAction::ClosePane, "alt+x");
 
         // Editor
         bind(KeyAction::GitNextChange, "alt+n");

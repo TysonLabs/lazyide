@@ -323,6 +323,19 @@ impl App {
             ));
             return Ok(());
         }
+        // Already open in the other pane: go there instead of opening twice.
+        if let Some(idx) = self.other_pane_tab_index(&path) {
+            self.focus_other_pane();
+            self.switch_to_tab(idx);
+            if !as_preview {
+                self.tabs[idx].is_preview = false;
+            }
+            self.set_status(format!(
+                "Switched to {} (other pane)",
+                relative_path(&self.root, &path).display()
+            ));
+            return Ok(());
+        }
 
         let bytes = fs::read(&path)?;
         if bytes.iter().take(8192).any(|&b| b == 0) {

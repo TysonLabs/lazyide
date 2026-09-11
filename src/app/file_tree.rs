@@ -81,7 +81,7 @@ impl App {
     }
 
     fn retarget_tabs_for_rename(&mut self, from: &Path, to: &Path) {
-        for tab in &mut self.tabs {
+        for tab in self.all_tabs_mut() {
             if tab.path == from {
                 tab.path = to.to_path_buf();
                 continue;

@@ -30,6 +30,7 @@ mod git_diff;
 mod input;
 mod input_handlers;
 mod lsp;
+mod panes;
 mod search;
 
 pub(crate) struct ContextMenuState {
@@ -38,6 +39,23 @@ pub(crate) struct ContextMenuState {
     pub(crate) target: Option<PathBuf>,
     pub(crate) pos: (u16, u16),
     pub(crate) rect: Rect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SplitDirection {
+    Vertical,
+    Horizontal,
+}
+
+/// The unfocused editor pane. See `app/panes.rs`.
+#[derive(Default)]
+pub(crate) struct Pane {
+    pub(crate) tabs: Vec<Tab>,
+    pub(crate) active_tab: usize,
+    pub(crate) editor_rect: Rect,
+    pub(crate) tab_bar_rect: Rect,
+    pub(crate) tab_rects: Vec<(Rect, Rect)>,
+    pub(crate) wrap_width_cache: usize,
 }
 
 #[derive(Default)]
@@ -124,6 +142,14 @@ pub(crate) struct App {
     pub(crate) divider_rect: Rect,
     pub(crate) tab_rects: Vec<(Rect, Rect)>,
     pub(crate) tab_bar_rect: Rect,
+    pub(crate) split: Option<SplitDirection>,
+    pub(crate) other_pane: Option<Pane>,
+    /// Whether the focused pane occupies the first (left/top) slot.
+    pub(crate) focused_pane_first: bool,
+    pub(crate) split_ratio: u16,
+    pub(crate) split_divider_rect: Rect,
+    pub(crate) split_dragging: bool,
+    pub(crate) editor_column_rect: Rect,
     pub(crate) context_menu: ContextMenuState,
     pub(crate) prompt: Option<PromptState>,
     pub(crate) prompt_rect: Rect,

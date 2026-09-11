@@ -149,33 +149,35 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     }
 
     // Tab bar gets its own row above the editor block.
-    let editor_column = editor_area;
-    let tab_row = Rect::new(editor_column.x, editor_column.y, editor_column.width, 1);
-    let editor_area = Rect::new(
-        editor_column.x,
-        editor_column.y.saturating_add(1),
-        editor_column.width,
-        editor_column.height.saturating_sub(1),
-    );
-    app.tab_bar_rect = tab_row;
-    app.editor_rect = editor_area;
-    render_tab_bar(app, frame, tab_row, &theme);
-
-    let editor_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(right_border))
-        .style(Style::default().bg(theme.bg_alt).fg(theme.fg));
-    frame.render_widget(editor_block, editor_area);
+    app.editor_column_rect = editor_area;
+    match app.split {
+        None => render_editor_pane(app, frame, editor_area, true, right_border, &theme),
+        Some(_) => {
+            let (first, second, divider) = app.pane_layout(editor_area);
+            app.split_divider_rect = divider;
+            let (focused_rect, other_rect) = if app.focused_pane_first {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            render_editor_pane(app, frame, focused_rect, true, right_border, &theme);
+            // Draw the other pane through the same path by swapping its state in.
+            app.swap_pane_state();
+            render_editor_pane(app, frame, other_rect, false, theme.border, &theme);
+            app.swap_pane_state();
+        }
+    }
     if app.files_view_open && app.divider_rect.width > 0 {
         // Redraw the shared border column as a proper split: the tree's corner
         // beside the tab row, a junction where the editor's top border meets it,
         // and a junction at the bottom. Colored for whichever pane has focus.
-        let color = if app.focus == Focus::Tree {
-            theme.accent
-        } else {
-            right_border
-        };
+        let first_pane_focused = !app.is_split() || app.focused_pane_first;
+        let color =
+            if app.focus == Focus::Tree || (app.focus == Focus::Editor && first_pane_focused) {
+                theme.accent
+            } else {
+                theme.border
+            };
         let d = app.divider_rect;
         let style = Style::default().fg(color).bg(theme.bg_alt);
         let buf = frame.buffer_mut();
@@ -192,6 +194,133 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             buf[(d.x, y)].set_symbol(sym).set_style(style);
         }
     }
+
+    status_bar::render_status_bar(&*app, frame, vertical[2]);
+
+    if app.menu_open {
+        render_menu(app, frame);
+    }
+    if app.file_picker_open {
+        render_file_picker(app, frame);
+    }
+    if app.theme_browser_open {
+        render_theme_browser(app, frame);
+    }
+    if app.search_results.open {
+        render_search_results(app, frame);
+    }
+    if app.diff_view.open {
+        render_diff_view(app, frame);
+    }
+    if app.completion.open {
+        render_completion_popup(app, frame);
+    }
+    if app.help_open {
+        render_help(app, frame);
+    }
+    if app.keybind_editor.open {
+        render_keybind_editor(app, frame);
+    }
+    if app.context_menu.open {
+        render_context_menu(app, frame);
+    }
+    if app.editor_context_menu_open {
+        render_editor_context_menu(app, frame);
+    }
+    if app.prompt.is_some() {
+        render_prompt(app, frame);
+    }
+    if matches!(app.pending, PendingAction::ClosePrompt) {
+        render_close_prompt(app, frame);
+    }
+    if matches!(app.pending, PendingAction::Delete(_)) {
+        render_delete_prompt(app, frame);
+    }
+    if app.active_tab().is_some_and(|t| t.conflict_prompt_open) {
+        render_conflict_prompt(app, frame);
+    }
+    if app.active_tab().is_some_and(|t| t.recovery_prompt_open) {
+        render_recovery_prompt(app, frame);
+    }
+}
+
+/// One-row tab strip. Column 0 is left blank so labels line up with the
+/// editor's left border (or the shared divider) below it.
+fn render_tab_bar(app: &mut App, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
+    app.tab_rects.clear();
+    let base = Style::default().bg(theme.bg_alt);
+    let mut spans: Vec<Span> = vec![Span::styled(" ", base)];
+    let mut x = area.x.saturating_add(1);
+    if app.tabs.is_empty() {
+        spans.push(Span::styled(" Working View", base.fg(theme.fg_muted)));
+    }
+    for (i, tab) in app.tabs.iter().enumerate() {
+        let fname = tab
+            .path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "untitled".to_string());
+        let marker = if tab.dirty { "● " } else { "" };
+        let name_text = format!(" {marker}{fname} ");
+        let close_text = "× ";
+        let active = i == app.active_tab;
+        let mut name_style = if active {
+            base.fg(theme.accent)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            base.fg(theme.fg_muted)
+        };
+        if tab.is_preview {
+            name_style = name_style.add_modifier(Modifier::ITALIC);
+        }
+        let close_style = if active {
+            base.fg(theme.accent)
+        } else {
+            base.fg(theme.fg_muted)
+        };
+        let name_w = name_text.width() as u16;
+        let close_w = close_text.width() as u16;
+        app.tab_rects.push((
+            Rect::new(x, area.y, name_w, 1),
+            Rect::new(x.saturating_add(name_w), area.y, close_w, 1),
+        ));
+        spans.push(Span::styled(name_text, name_style));
+        spans.push(Span::styled(close_text, close_style));
+        spans.push(Span::styled(" ", base));
+        x = x.saturating_add(name_w + close_w + 1);
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
+}
+
+/// Render one editor pane (tab row + bordered editor) into `editor_area`,
+/// reading the focused pane's state from `app`. When `focused` is false the
+/// cursor and inline completion are suppressed.
+fn render_editor_pane(
+    app: &mut App,
+    frame: &mut Frame<'_>,
+    editor_area: Rect,
+    focused: bool,
+    border_color: Color,
+    theme: &crate::theme::Theme,
+) {
+    let editor_column = editor_area;
+    let tab_row = Rect::new(editor_column.x, editor_column.y, editor_column.width, 1);
+    let editor_area = Rect::new(
+        editor_column.x,
+        editor_column.y.saturating_add(1),
+        editor_column.width,
+        editor_column.height.saturating_sub(1),
+    );
+    app.tab_bar_rect = tab_row;
+    app.editor_rect = editor_area;
+    render_tab_bar(app, frame, tab_row, theme);
+
+    let editor_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(theme.bg_alt).fg(theme.fg));
+    frame.render_widget(editor_block, editor_area);
     let inner = app.editor_inner_rect();
 
     frame.render_widget(Clear, inner);
@@ -433,7 +562,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
         let segment_text = slice_chars(&lines_ref[row], seg_start, seg_end).replace('\t', "    ");
         let bracket_colors = [theme.bracket_1, theme.bracket_2, theme.bracket_3];
         let bd = bracket_depths_ref.get(row).copied().unwrap_or(0);
-        let hl = highlight_line(&segment_text, lang, &theme, bd, &bracket_colors);
+        let hl = highlight_line(&segment_text, lang, theme, bd, &bracket_colors);
         let guide_depth = indent_depths.get(row).copied().unwrap_or(0);
         let content_spans = if is_first_segment {
             apply_indent_guides(hl.spans, guide_depth, guide_style)
@@ -546,7 +675,7 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
     }
     let editor_text = Paragraph::new(lines_out).style(Style::default().bg(theme.bg).fg(theme.fg));
     frame.render_widget(editor_text, inner);
-    if app.focus == Focus::Editor && has_tab {
+    if focused && app.focus == Focus::Editor && has_tab {
         let cursor_visible = app.visible_index_of_source_position(cursor_row, cursor_col);
         let cursor_y = cursor_visible.saturating_sub(start_row);
         if cursor_y < visible_rows {
@@ -613,100 +742,4 @@ pub(crate) fn draw(app: &mut App, frame: &mut Frame<'_>) {
             ));
         }
     }
-
-    status_bar::render_status_bar(&*app, frame, vertical[2]);
-
-    if app.menu_open {
-        render_menu(app, frame);
-    }
-    if app.file_picker_open {
-        render_file_picker(app, frame);
-    }
-    if app.theme_browser_open {
-        render_theme_browser(app, frame);
-    }
-    if app.search_results.open {
-        render_search_results(app, frame);
-    }
-    if app.diff_view.open {
-        render_diff_view(app, frame);
-    }
-    if app.completion.open {
-        render_completion_popup(app, frame);
-    }
-    if app.help_open {
-        render_help(app, frame);
-    }
-    if app.keybind_editor.open {
-        render_keybind_editor(app, frame);
-    }
-    if app.context_menu.open {
-        render_context_menu(app, frame);
-    }
-    if app.editor_context_menu_open {
-        render_editor_context_menu(app, frame);
-    }
-    if app.prompt.is_some() {
-        render_prompt(app, frame);
-    }
-    if matches!(app.pending, PendingAction::ClosePrompt) {
-        render_close_prompt(app, frame);
-    }
-    if matches!(app.pending, PendingAction::Delete(_)) {
-        render_delete_prompt(app, frame);
-    }
-    if app.active_tab().is_some_and(|t| t.conflict_prompt_open) {
-        render_conflict_prompt(app, frame);
-    }
-    if app.active_tab().is_some_and(|t| t.recovery_prompt_open) {
-        render_recovery_prompt(app, frame);
-    }
-}
-
-/// One-row tab strip. Column 0 is left blank so labels line up with the
-/// editor's left border (or the shared divider) below it.
-fn render_tab_bar(app: &mut App, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
-    app.tab_rects.clear();
-    let base = Style::default().bg(theme.bg_alt);
-    let mut spans: Vec<Span> = vec![Span::styled(" ", base)];
-    let mut x = area.x.saturating_add(1);
-    if app.tabs.is_empty() {
-        spans.push(Span::styled(" Working View", base.fg(theme.fg_muted)));
-    }
-    for (i, tab) in app.tabs.iter().enumerate() {
-        let fname = tab
-            .path
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| "untitled".to_string());
-        let marker = if tab.dirty { "● " } else { "" };
-        let name_text = format!(" {marker}{fname} ");
-        let close_text = "× ";
-        let active = i == app.active_tab;
-        let mut name_style = if active {
-            base.fg(theme.accent)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-        } else {
-            base.fg(theme.fg_muted)
-        };
-        if tab.is_preview {
-            name_style = name_style.add_modifier(Modifier::ITALIC);
-        }
-        let close_style = if active {
-            base.fg(theme.accent)
-        } else {
-            base.fg(theme.fg_muted)
-        };
-        let name_w = name_text.width() as u16;
-        let close_w = close_text.width() as u16;
-        app.tab_rects.push((
-            Rect::new(x, area.y, name_w, 1),
-            Rect::new(x.saturating_add(name_w), area.y, close_w, 1),
-        ));
-        spans.push(Span::styled(name_text, name_style));
-        spans.push(Span::styled(close_text, close_style));
-        spans.push(Span::styled(" ", base));
-        x = x.saturating_add(name_w + close_w + 1);
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
 }
