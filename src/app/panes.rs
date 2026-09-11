@@ -309,3 +309,37 @@ mod tests {
         assert!(!app.is_split());
     }
 }
+
+#[cfg(test)]
+mod render_tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn draw(app: &mut App) {
+        let backend = TestBackend::new(140, 45);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| crate::ui::draw(app, f)).unwrap();
+    }
+
+    #[test]
+    fn move_only_tab_then_render_does_not_panic() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+        let mut app = App::new(root.to_path_buf()).unwrap();
+        app.open_file(root.join("a.rs")).unwrap();
+        draw(&mut app);
+        app.split_pane(SplitDirection::Horizontal);
+        draw(&mut app);
+        app.move_tab_to_other_pane();
+        draw(&mut app);
+        draw(&mut app);
+        app.focus_other_pane();
+        draw(&mut app);
+        app.close_pane();
+        draw(&mut app);
+    }
+}
