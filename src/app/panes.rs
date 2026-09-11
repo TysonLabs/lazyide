@@ -137,9 +137,13 @@ impl App {
         if !self.is_split() {
             return;
         }
+        // Global fields such as focus belong to the real focused pane; an
+        // operation that empties the other pane must not steal them.
+        let focus = self.focus;
         self.swap_pane_state();
         f(self);
         self.swap_pane_state();
+        self.focus = focus;
     }
 
     /// Index of a tab open in the other pane, if any.
@@ -326,9 +330,13 @@ mod tests {
         app.open_file(root.join("keep.rs")).unwrap();
         assert_eq!(app.all_tabs().count(), 3);
 
+        let focus_before = app.focus;
         app.close_tabs_for_path_prefix(&root.join("dir"));
         assert_eq!(app.all_tabs().count(), 1);
         assert_eq!(app.all_tabs().next().unwrap().path, root.join("keep.rs"));
+        // Emptying the other pane must not change which pane has focus.
+        assert_eq!(app.focus, focus_before);
+        assert_eq!(app.tabs.len(), 1);
     }
 
     #[test]
