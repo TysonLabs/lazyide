@@ -115,6 +115,11 @@ impl App {
         }
     }
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> io::Result<()> {
+        // A minimap drag ends on any left-button release, wherever it lands,
+        // before any modal, tree, or pane branch can return early.
+        if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
+            self.minimap_dragging = false;
+        }
         if self.help_open {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
                 self.help_open = false;
@@ -267,11 +272,6 @@ impl App {
                 _ => {}
             }
             return Ok(());
-        }
-
-        // A minimap drag ends on any left-button release, wherever it lands.
-        if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
-            self.minimap_dragging = false;
         }
 
         // Split divider: drag to resize the two panes.
