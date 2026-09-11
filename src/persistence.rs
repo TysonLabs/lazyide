@@ -15,6 +15,8 @@ pub(crate) struct PersistedState {
     pub(crate) files_pane_width: Option<u16>,
     #[serde(default)]
     pub(crate) word_wrap: Option<bool>,
+    #[serde(default)]
+    pub(crate) minimap: Option<bool>,
 }
 
 pub(crate) fn autosave_path_for(path: &Path) -> PathBuf {

@@ -47,6 +47,7 @@ pub(crate) enum CommandAction {
     FocusOtherPane,
     MoveTabToOtherPane,
     ClosePane,
+    ToggleMinimap,
 }
 
 #[derive(Debug, Clone)]

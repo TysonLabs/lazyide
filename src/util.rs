@@ -71,6 +71,7 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::FocusOtherPane => "Focus Other Pane",
         CommandAction::MoveTabToOtherPane => "Move Tab to Other Pane",
         CommandAction::ClosePane => "Close Pane",
+        CommandAction::ToggleMinimap => "Toggle Minimap",
     }
 }
 

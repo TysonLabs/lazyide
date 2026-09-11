@@ -405,6 +405,7 @@ mod theme_and_persistence_tests {
             theme_name: "Dracula".to_string(),
             files_pane_width: Some(30),
             word_wrap: Some(true),
+            minimap: None,
         };
         let json = serde_json::to_string(&state).unwrap();
         let de: PersistedState = serde_json::from_str(&json).unwrap();
@@ -419,6 +420,7 @@ mod theme_and_persistence_tests {
             theme_name: "Nord".to_string(),
             files_pane_width: None,
             word_wrap: None,
+            minimap: None,
         };
         let json = serde_json::to_string(&state).unwrap();
         let de: PersistedState = serde_json::from_str(&json).unwrap();

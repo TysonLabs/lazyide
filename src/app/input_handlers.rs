@@ -474,6 +474,7 @@ impl App {
             KeyAction::FocusOtherPane => self.focus_other_pane(),
             KeyAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
             KeyAction::ClosePane => self.close_pane(),
+            KeyAction::ToggleMinimap => self.toggle_minimap(),
             KeyAction::GitNextChange => self.jump_to_change(true),
             KeyAction::GitPrevChange => self.jump_to_change(false),
             KeyAction::GoToLine => {

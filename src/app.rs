@@ -150,6 +150,8 @@ pub(crate) struct App {
     pub(crate) split_divider_rect: Rect,
     pub(crate) split_dragging: bool,
     pub(crate) editor_column_rect: Rect,
+    pub(crate) minimap_enabled: bool,
+    pub(crate) minimap_dragging: bool,
     pub(crate) context_menu: ContextMenuState,
     pub(crate) prompt: Option<PromptState>,
     pub(crate) prompt_rect: Rect,

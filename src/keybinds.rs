@@ -38,6 +38,7 @@ pub(crate) enum KeyAction {
     FocusOtherPane,
     MoveTabToOtherPane,
     ClosePane,
+    ToggleMinimap,
     // Editor
     GoToDefinition,
     FoldToggle,
@@ -98,6 +99,7 @@ impl KeyAction {
                 | KeyAction::FocusOtherPane
                 | KeyAction::MoveTabToOtherPane
                 | KeyAction::ClosePane
+                | KeyAction::ToggleMinimap
         )
     }
 
@@ -122,6 +124,7 @@ impl KeyAction {
             KeyAction::FocusOtherPane => "Focus Other Pane",
             KeyAction::MoveTabToOtherPane => "Move Tab to Other Pane",
             KeyAction::ClosePane => "Close Pane",
+            KeyAction::ToggleMinimap => "Toggle Minimap",
             KeyAction::GitNextChange => "Next Change",
             KeyAction::GitPrevChange => "Previous Change",
             KeyAction::GoToLine => "Go to Line",
@@ -191,6 +194,7 @@ impl KeyAction {
             KeyAction::FocusOtherPane,
             KeyAction::MoveTabToOtherPane,
             KeyAction::ClosePane,
+            KeyAction::ToggleMinimap,
             KeyAction::GoToDefinition,
             KeyAction::FoldToggle,
             KeyAction::FoldAllToggle,
@@ -622,6 +626,7 @@ impl KeyBindings {
         bind(KeyAction::FocusOtherPane, "alt+w");
         bind(KeyAction::MoveTabToOtherPane, "alt+m");
         bind(KeyAction::ClosePane, "alt+x");
+        bind(KeyAction::ToggleMinimap, "alt+i");
 
         // Editor
         bind(KeyAction::GitNextChange, "alt+n");

@@ -26,6 +26,7 @@ src/
     helpers.rs         UI utilities (centered_rect, label helpers, indent guides, horizontal span clipping)
   keybinds.rs          KeyAction enum, KeyBind, KeyBindings, JSON load/save
   diff.rs              Unified diff -> side-by-side rows (FileDiff/DiffRow), change-jump helper
+  minimap.rs           Minimap math: lines per row, bar width, centered scroll
   types.rs             Focus, PendingAction, PromptMode, CommandAction enums
   tab.rs               Tab struct (incl. editor_scroll_col for horizontal scroll), FoldRange, ProjectSearchHit, GitLineStatus, GitFileStatus, GitChangeSummary
   tree_item.rs         TreeItem struct
@@ -93,7 +94,8 @@ Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling 
                   the accent color, × close buttons, ● dirty marker, click rects
                   stored in app.tab_rects / app.tab_bar_rect
 6. Editor         Line-by-line rendering inside a 1-char horizontal padding
-                  (App::editor_inner_rect), 11-char gutter:
+                  (App::editor_inner_rect, which also excludes the minimap
+                  column when App::minimap_shown()), 11-char gutter:
                     - Line number (5 chars)
                     - Fold indicator (triangle, 2 chars)
                     - Diagnostic marker (colored dot, 1 char)
@@ -103,6 +105,11 @@ Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling 
                     - Horizontal scroll clipping (when word wrap off, via clip_spans_by_columns)
                     - Cursor row highlight, selection highlight
                     - Fold summary ("... [N lines]")
+                  Minimap (render_minimap): 12-column strip at the right edge,
+                  one ━ bar per row sized by the longest line it covers, viewport
+                  rows on bg_alt, cursor row in accent; click/drag scrolls
+                  (App::scroll_to_minimap_row). Hidden under 70 columns or via
+                  Alt+I (persisted in state.json as `minimap`).
 7. Status bar     ui/status_bar.rs — left: focus chip + git branch +/-; center:
                   status message (5s TTL) > breadcrumbs of open file > keybind
                   hints; right: Ln/Col, ● errors ▲ warnings, UTF-8, Wrap
@@ -161,7 +168,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-296 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+300 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
 
 ## Adding a New Feature
 

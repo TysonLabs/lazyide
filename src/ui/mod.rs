@@ -675,6 +675,19 @@ fn render_editor_pane(
     }
     let editor_text = Paragraph::new(lines_out).style(Style::default().bg(theme.bg).fg(theme.fg));
     frame.render_widget(editor_text, inner);
+    if let Some(mm) = app.minimap_rect() {
+        render_minimap(
+            frame,
+            mm,
+            theme,
+            lines_ref,
+            visible_rows_map_ref,
+            start_row,
+            visible_rows,
+            cursor_row,
+            has_tab,
+        );
+    }
     if focused && app.focus == Focus::Editor && has_tab {
         let cursor_visible = app.visible_index_of_source_position(cursor_row, cursor_col);
         let cursor_y = cursor_visible.saturating_sub(start_row);
@@ -742,4 +755,69 @@ fn render_editor_pane(
             ));
         }
     }
+}
+
+/// Condensed overview of the whole file: one bar per row, its length
+/// proportional to the longest line it summarizes. Rows covering the visible
+/// viewport get a lighter background; the cursor's row is accented.
+#[allow(clippy::too_many_arguments)]
+fn render_minimap(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    theme: &crate::theme::Theme,
+    lines: &[String],
+    visible_rows_map: &[usize],
+    start_row: usize,
+    viewport_rows: usize,
+    cursor_row: usize,
+    has_tab: bool,
+) {
+    use crate::minimap::{bar_width, lines_per_row, max_len_in};
+
+    let height = area.height as usize;
+    let width = area.width as usize;
+    if height == 0 || width == 0 {
+        return;
+    }
+    // editor_inner_rect already leaves a one-column gap before this rect.
+    let bar_cols = width;
+    let total = if has_tab { lines.len() } else { 0 };
+    let lpr = lines_per_row(total, height);
+    // Viewport in source lines → minimap rows.
+    let first_line = visible_rows_map.get(start_row).copied().unwrap_or(0);
+    let last_idx = (start_row + viewport_rows)
+        .saturating_sub(1)
+        .min(visible_rows_map.len().saturating_sub(1));
+    let last_line = visible_rows_map
+        .get(last_idx)
+        .copied()
+        .unwrap_or(first_line);
+    let (vp_start, vp_end) = (first_line / lpr, last_line / lpr);
+    let cursor_mm_row = cursor_row / lpr;
+
+    let mut out: Vec<Line> = Vec::with_capacity(height);
+    for r in 0..height {
+        let (from, to) = (r * lpr, (r + 1) * lpr);
+        let in_view = has_tab && r >= vp_start && r <= vp_end;
+        let row_bg = if in_view { theme.bg_alt } else { theme.bg };
+        let len = if from < total {
+            max_len_in(lines, from, to)
+        } else {
+            0
+        };
+        let w = bar_width(len, bar_cols);
+        let bar_fg = if has_tab && r == cursor_mm_row {
+            theme.accent
+        } else if in_view {
+            theme.fg_muted
+        } else {
+            theme.border
+        };
+        let base = Style::default().bg(row_bg);
+        out.push(Line::from(vec![
+            Span::styled("━".repeat(w), base.fg(bar_fg)),
+            Span::styled(" ".repeat(bar_cols - w), base),
+        ]));
+    }
+    frame.render_widget(Paragraph::new(out), area);
 }
