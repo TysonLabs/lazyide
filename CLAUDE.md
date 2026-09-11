@@ -36,7 +36,7 @@ The app is now modular (library + thin binary launcher):
 - `src/ui/mod.rs` + `src/ui/overlays.rs` + `src/ui/helpers.rs` — drawing and overlays
 - Shared domain/util modules:
   - `src/types.rs`, `src/tab.rs`, `src/tree_item.rs`
-  - `src/theme.rs`, `src/syntax.rs`, `src/persistence.rs`, `src/lsp_client.rs`, `src/keybinds.rs`, `src/diff.rs`, `src/util.rs`
+  - `src/theme.rs`, `src/syntax.rs`, `src/persistence.rs`, `src/lsp_client.rs`, `src/keybinds.rs`, `src/diff.rs`, `src/minimap.rs`, `src/util.rs`
 
 Core model remains the same:
 
