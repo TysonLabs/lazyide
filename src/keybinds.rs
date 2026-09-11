@@ -488,9 +488,64 @@ impl KeyBind {
         ev_code_normalized == bind_code_normalized && ev_mods == bind_mods_cmp
     }
 
+    /// Build a binding from a live key event in canonical form: control
+    /// characters become letters and an uppercase letter becomes the lowercase
+    /// letter plus Shift, so the binding round-trips through the config file.
+    pub(crate) fn from_event(key: &KeyEvent) -> KeyBind {
+        let mut modifiers = key.modifiers;
+        let code = match KeyBind::normalize_char_with_modifiers(key.code, key.modifiers) {
+            KeyCode::Char(c) if c.is_ascii_uppercase() => {
+                modifiers |= KeyModifiers::SHIFT;
+                KeyCode::Char(c.to_ascii_lowercase())
+            }
+            other => other,
+        };
+        KeyBind { modifiers, code }
+    }
+
+    /// Like `matches`, but Shift must agree exactly for character keys, so a
+    /// `ctrl+shift+f` binding does not swallow plain `ctrl+f` and vice versa.
+    /// Used as the first lookup pass; `matches` remains the lenient fallback.
+    pub(crate) fn matches_strict(&self, key: &KeyEvent) -> bool {
+        let lower = |code: KeyCode| match code {
+            KeyCode::Char(c) => KeyCode::Char(c.to_ascii_lowercase()),
+            other => other,
+        };
+        let bind_code = lower(KeyBind::normalize_char_with_modifiers(
+            self.code,
+            self.modifiers,
+        ));
+        let ev_code = lower(KeyBind::normalize_char_with_modifiers(
+            key.code,
+            key.modifiers,
+        ));
+        if bind_code == KeyCode::BackTab && ev_code == KeyCode::BackTab {
+            return (key.modifiers - KeyModifiers::SHIFT) == (self.modifiers - KeyModifiers::SHIFT);
+        }
+        // Kitty-protocol terminals report ctrl+shift+f as Char('F') + CONTROL:
+        // the shifted codepoint replaces the key and the Shift flag is cleared.
+        // An uppercase ASCII letter therefore implies Shift.
+        let mut ev_mods = key.modifiers;
+        if let KeyCode::Char(c) = key.code
+            && c.is_ascii_uppercase()
+        {
+            ev_mods |= KeyModifiers::SHIFT;
+        }
+        let mut bind_mods = self.modifiers;
+        if let KeyCode::Char(c) = self.code
+            && c.is_ascii_uppercase()
+        {
+            bind_mods |= KeyModifiers::SHIFT;
+        }
+        ev_code == bind_code && ev_mods == bind_mods
+    }
+
+    /// Two bindings conflict when lookup would treat them as the same key.
+    /// Mirrors the strict pass of `KeyBindings::lookup`, so `ctrl+f` and
+    /// `ctrl+shift+f` are distinct.
     pub(crate) fn conflicts_with(&self, other: &KeyBind) -> bool {
-        self.matches(&KeyEvent::new(other.code, other.modifiers))
-            || other.matches(&KeyEvent::new(self.code, self.modifiers))
+        self.matches_strict(&KeyEvent::new(other.code, other.modifiers))
+            || other.matches_strict(&KeyEvent::new(self.code, self.modifiers))
     }
 
     pub(crate) fn to_string_config(&self) -> String {
@@ -529,6 +584,7 @@ impl KeyBindings {
         bind(KeyAction::Find, "ctrl+f");
         bind(KeyAction::FindReplace, "ctrl+h");
         bind(KeyAction::SearchFiles, "ctrl+shift+f");
+        bind(KeyAction::SearchFiles, "alt+f");
         bind(KeyAction::Help, "f4");
         bind(KeyAction::NewFile, "ctrl+n");
         bind(KeyAction::RefreshTree, "ctrl+r");
@@ -578,19 +634,31 @@ impl KeyBindings {
         KeyBindings { map }
     }
 
+    /// Resolve a key event. Pass 1 requires modifiers (including Shift on
+    /// character keys) to match exactly, so terminals that report
+    /// `ctrl+shift+<letter>` reach those bindings. Pass 2 falls back to the
+    /// lenient match so an unexpected Shift (uppercase, caps lock) still hits
+    /// the plain binding when nothing claimed the shifted form.
     pub(crate) fn lookup(&self, key: &KeyEvent, scope: KeyScope) -> Option<KeyAction> {
-        for action in KeyAction::all().iter().copied() {
-            let in_scope = match scope {
-                KeyScope::Global => action.is_global(),
-                KeyScope::Editor => action.is_editor(),
-            };
-            if !in_scope {
-                continue;
-            }
-            if let Some(binds) = self.map.get(&action) {
-                for bind in binds {
-                    if bind.matches(key) {
-                        return Some(action);
+        for strict in [true, false] {
+            for action in KeyAction::all().iter().copied() {
+                let in_scope = match scope {
+                    KeyScope::Global => action.is_global(),
+                    KeyScope::Editor => action.is_editor(),
+                };
+                if !in_scope {
+                    continue;
+                }
+                if let Some(binds) = self.map.get(&action) {
+                    for bind in binds {
+                        let hit = if strict {
+                            bind.matches_strict(key)
+                        } else {
+                            bind.matches(key)
+                        };
+                        if hit {
+                            return Some(action);
+                        }
                     }
                 }
             }
@@ -1027,11 +1095,15 @@ mod keybind_tests {
     #[test]
     fn test_find_conflict_matches_runtime_semantics_for_shifted_chars() {
         let kb = KeyBindings::defaults();
+        // Lookup keeps ctrl+s and ctrl+shift+s distinct, so binding the shifted
+        // form is not a conflict with Save...
         let bind = KeyBind::parse("ctrl+shift+s").unwrap();
-        // Runtime matching treats Ctrl+S and Ctrl+Shift+S as conflicting for Char keys.
+        assert_eq!(kb.find_conflict(&bind, KeyAction::NewFile), None);
+        // ...but the same shifted key already bound elsewhere is.
+        let bind = KeyBind::parse("ctrl+shift+f").unwrap();
         assert_eq!(
             kb.find_conflict(&bind, KeyAction::NewFile),
-            Some(KeyAction::Save)
+            Some(KeyAction::SearchFiles)
         );
     }
 
@@ -1150,6 +1222,78 @@ mod keybind_tests {
         assert_eq!(kb.lookup(&event, KeyScope::Global), None);
         let event2 = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT);
         assert_eq!(kb.lookup(&event2, KeyScope::Global), Some(KeyAction::Save));
+    }
+
+    #[test]
+    fn test_lookup_prefers_shift_binding_when_event_carries_shift() {
+        let kb = KeyBindings::defaults();
+        // ctrl+shift+f → Search Files, even though Find (ctrl+f) comes first in
+        // KeyAction::all(). Kitty-protocol terminals report it as Char('F') with
+        // CONTROL only (Shift folded into the uppercase letter); some report
+        // CONTROL|SHIFT. Both must resolve the same way.
+        for mods in [
+            KeyModifiers::CONTROL,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ] {
+            let shifted = KeyEvent::new(KeyCode::Char('F'), mods);
+            assert_eq!(
+                kb.lookup(&shifted, KeyScope::Global),
+                Some(KeyAction::SearchFiles),
+                "mods {mods:?}"
+            );
+        }
+        // Plain ctrl+f still goes to Find.
+        let plain = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
+        assert_eq!(kb.lookup(&plain, KeyScope::Global), Some(KeyAction::Find));
+        // Editor scope: ctrl+shift+z → Redo, ctrl+z → Undo.
+        let redo = KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::CONTROL);
+        assert_eq!(kb.lookup(&redo, KeyScope::Editor), Some(KeyAction::Redo));
+        let undo = KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL);
+        assert_eq!(kb.lookup(&undo, KeyScope::Editor), Some(KeyAction::Undo));
+    }
+
+    #[test]
+    fn test_lookup_falls_back_to_plain_binding_for_unclaimed_shift() {
+        let kb = KeyBindings::defaults();
+        // Nothing binds ctrl+shift+s, so an uppercase/shifted ctrl+s still saves.
+        let event = KeyEvent::new(
+            KeyCode::Char('S'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert_eq!(kb.lookup(&event, KeyScope::Global), Some(KeyAction::Save));
+    }
+
+    #[test]
+    fn test_matches_strict_requires_shift_agreement_for_chars() {
+        let shift_bind = KeyBind::parse("ctrl+shift+f").unwrap();
+        let plain_bind = KeyBind::parse("ctrl+f").unwrap();
+        let shifted = KeyEvent::new(
+            KeyCode::Char('f'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        let plain = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
+        assert!(shift_bind.matches_strict(&shifted));
+        assert!(!shift_bind.matches_strict(&plain));
+        assert!(plain_bind.matches_strict(&plain));
+        assert!(!plain_bind.matches_strict(&shifted));
+        // Non-character keys were always exact; unchanged.
+        let sr = KeyBind::parse("shift+right").unwrap();
+        assert!(sr.matches_strict(&KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)));
+        assert!(!sr.matches_strict(&KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn test_from_event_canonicalizes_uppercase_to_shift() {
+        let kb = KeyBind::from_event(&KeyEvent::new(KeyCode::Char('S'), KeyModifiers::CONTROL));
+        assert_eq!(kb, KeyBind::parse("ctrl+shift+s").unwrap());
+        assert_eq!(kb.to_string_config(), "ctrl+shift+s");
+        let plain = KeyBind::from_event(&KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert_eq!(plain.to_string_config(), "ctrl+s");
+        let ctl = KeyBind::from_event(&KeyEvent::new(
+            KeyCode::Char('\u{2}'),
+            KeyModifiers::CONTROL,
+        ));
+        assert_eq!(ctl.to_string_config(), "ctrl+b");
     }
 
     #[test]

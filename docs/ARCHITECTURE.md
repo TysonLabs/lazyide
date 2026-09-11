@@ -41,7 +41,7 @@ src/
 
 **UI never mutates state.** The `draw()` function and all `render_*` functions in `ui/` take `&App` (or clone data from it) and only write to the `Frame`. State mutations happen exclusively in `app/` methods.
 
-**Keybindings are data-driven.** ~40 actions are defined in the `KeyAction` enum. Default key mappings are in `KeyBindings::defaults()`. User overrides layer on top from `~/.config/lazyide/keybinds.json`. The `lookup()` method resolves a `KeyEvent` to a `KeyAction`.
+**Keybindings are data-driven.** ~40 actions are defined in the `KeyAction` enum. Default key mappings are in `KeyBindings::defaults()`. User overrides layer on top from `~/.config/lazyide/keybinds.json`. The `lookup()` method resolves a `KeyEvent` to a `KeyAction` in two passes: first requiring modifiers (including Shift on character keys) to match exactly, then falling back to a lenient match that ignores Shift, so `ctrl+shift+f` and `ctrl+f` stay distinct in terminals that report Shift while a stray uppercase still hits the plain binding.
 
 ## Event Loop
 
@@ -156,7 +156,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-285 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+289 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
 
 ## Adding a New Feature
 
