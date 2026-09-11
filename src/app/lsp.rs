@@ -264,12 +264,20 @@ impl App {
             .unwrap_or_default()
             .to_string();
         // Find the tab that matches this URI
-        let tab_idx = self
+        // Diagnostics may belong to a tab in either pane.
+        let in_focused = self
             .tabs
             .iter()
             .position(|t| t.open_doc_uri.as_deref() == Some(uri.as_str()));
-        let Some(tab_idx) = tab_idx else {
-            return;
+        let in_other = self.other_pane.as_ref().and_then(|p| {
+            p.tabs
+                .iter()
+                .position(|t| t.open_doc_uri.as_deref() == Some(uri.as_str()))
+        });
+        let (tab_idx, other) = match (in_focused, in_other) {
+            (Some(i), _) => (i, false),
+            (None, Some(i)) => (i, true),
+            (None, None) => return,
         };
         let mut diagnostics = Vec::new();
         if let Some(items) = params.get("diagnostics").and_then(Value::as_array) {
@@ -301,7 +309,13 @@ impl App {
                 });
             }
         }
-        self.tabs[tab_idx].diagnostics = diagnostics;
+        if other {
+            if let Some(p) = self.other_pane.as_mut() {
+                p.tabs[tab_idx].diagnostics = diagnostics;
+            }
+        } else {
+            self.tabs[tab_idx].diagnostics = diagnostics;
+        }
     }
 
     pub(crate) fn request_lsp_completion(&mut self) {

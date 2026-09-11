@@ -84,6 +84,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **32 themes** — dark and light, with live preview browser
 - **Customizable keybindings** — remap ~40 actions via config file or in-app editor
 - **Tabbed editing** — dedicated tab row, preview tabs, sticky tabs, dirty indicators
+- **Split panes** — two editor panes side by side or stacked, each with its own tab group; move tabs between them, drag the divider
 - **Status bar** — focus mode, git branch with +/- counts, file breadcrumbs, cursor position, diagnostic counts
 - **File tree** — folders-first sorting, expand/collapse, context menus, resizable divider
 - **Command palette** — `Ctrl+P` for quick access to all actions
@@ -106,6 +107,10 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 | `Ctrl+H` | Find and replace |
 | `Ctrl+Shift+F` / `Alt+F` | Search project (ripgrep) |
 | `F5` | Git diff of current file |
+| `Alt+V` / `Alt+S` | Split editor vertically / horizontally |
+| `Alt+W` | Focus other pane |
+| `Alt+M` | Move tab to other pane |
+| `Alt+X` | Close pane |
 | `Ctrl+N` | New file |
 | `Ctrl+R` | Refresh tree |
 | `Alt+Z` | Toggle word wrap |

@@ -42,6 +42,11 @@ pub(crate) enum CommandAction {
     Keybinds,
     ToggleWordWrap,
     GitDiff,
+    SplitVertical,
+    SplitHorizontal,
+    FocusOtherPane,
+    MoveTabToOtherPane,
+    ClosePane,
 }
 
 #[derive(Debug, Clone)]

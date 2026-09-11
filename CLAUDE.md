@@ -31,6 +31,7 @@ The app is now modular (library + thin binary launcher):
   - `file_tree.rs` (tree build/navigation/context actions)
   - `search.rs` (find/replace/project search)
   - `git_diff.rs` (diff view keys, next/previous change jumps)
+  - `panes.rs` (two-pane split: focus swap, split/close/move tab, layout, divider drag)
   - `lsp.rs` (LSP lifecycle, diagnostics, completion, definition handling)
 - `src/ui/mod.rs` + `src/ui/overlays.rs` + `src/ui/helpers.rs` — drawing and overlays
 - Shared domain/util modules:

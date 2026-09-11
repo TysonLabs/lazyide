@@ -18,6 +18,7 @@ src/
     lsp.rs             LSP lifecycle, completion, diagnostics, go-to-definition
     search.rs          Find/replace in file, project search (ripgrep)
     git_diff.rs        Diff view open/scroll/hunk keys, next/previous change jumps
+    panes.rs           Two-pane split: swap-based focus, split/close/move, layout, divider drag
   ui/
     mod.rs             Main draw() function (layout, tree pane, tab row, editor pane)
     status_bar.rs      Structured status bar (mode, branch, breadcrumbs, cursor, diagnostics)
@@ -38,6 +39,8 @@ src/
 ## Key Design Decisions
 
 **Single App struct, split `impl` blocks.** All application state lives in one `App` struct defined in `app.rs`. Methods are spread across `app/*.rs` files using Rust's multiple-impl-block feature. This avoids borrow checker issues that arise when sub-state structs have their own `&mut self` methods needing cross-access.
+
+**Two editor panes via state swap.** The focused pane's tab group is `App::tabs` / `App::active_tab` plus its geometry (`editor_rect`, `tab_bar_rect`, `tab_rects`, `wrap_width_cache`). The other pane keeps the same fields in `App::other_pane: Option<Pane>`. `focus_other_pane()` swaps them, so the 180+ call sites that operate on "the active tab" never learn about panes. Rendering draws the other pane through the same `render_editor_pane()` by swapping in, drawing with `focused = false`, and swapping back. A file is open in one pane at a time; the few paths that must see every tab (autosave, git refresh, LSP diagnostics, rename retargeting, dirty check, wrap rebuild) use `all_tabs()` / `all_tabs_mut()`.
 
 **UI never mutates state.** The `draw()` function and all `render_*` functions in `ui/` take `&App` (or clone data from it) and only write to the `Frame`. State mutations happen exclusively in `app/` methods.
 
@@ -79,7 +82,9 @@ Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling 
 1. Layout         3-row vertical: top bar | main content | status bar
 2. Main split     If file tree open: [tree | editor], else [editor]. The editor's
                   left border doubles as the draggable divider and is redrawn
-                  with ┬/┴ junctions in the focused pane's color.
+                  with junctions in the first pane's focus color. When split, the
+                  editor column is divided by `App::pane_layout` (ratio in
+                  `split_ratio`) and each pane renders its own tab row + block.
 3. Top bar        "lazyide  root: ..." (branch and file live in the status bar)
 4. File tree      ListWidget with TreeItem names, indent by depth
                   Files colored by git status (theme git_modified/git_added,
@@ -156,7 +161,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-289 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+296 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
 
 ## Adding a New Feature
 

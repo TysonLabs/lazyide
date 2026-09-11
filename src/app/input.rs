@@ -201,8 +201,9 @@ impl App {
                         let desired = mouse.column.saturating_sub(self.tree_rect.x);
                         self.files_pane_width = desired.max(Self::MIN_FILES_PANE_WIDTH);
                         self.clamp_files_pane_width(
-                            // The divider column lives inside editor_rect now.
-                            self.editor_rect.width + self.tree_rect.width,
+                            // The divider column lives inside the editor column,
+                            // which may be split into two panes.
+                            self.editor_column_rect.width + self.tree_rect.width,
                         );
                         return Ok(());
                     }
@@ -266,6 +267,43 @@ impl App {
                 _ => {}
             }
             return Ok(());
+        }
+
+        // Split divider: drag to resize the two panes.
+        if self.is_split() {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left)
+                    if inside(mouse.column, mouse.row, self.split_divider_rect) =>
+                {
+                    self.split_dragging = true;
+                    return Ok(());
+                }
+                MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Moved
+                    if self.split_dragging =>
+                {
+                    self.drag_split_to(mouse.column, mouse.row);
+                    return Ok(());
+                }
+                MouseEventKind::Up(MouseButton::Left) if self.split_dragging => {
+                    self.split_dragging = false;
+                    return Ok(());
+                }
+                _ => {}
+            }
+            // Interacting with the other pane focuses it; the rects swap, so the
+            // handlers below then operate on it as the focused pane.
+            let in_other = self.other_pane.as_ref().is_some_and(|p| {
+                inside(mouse.column, mouse.row, p.editor_rect)
+                    || inside(mouse.column, mouse.row, p.tab_bar_rect)
+            });
+            if in_other
+                && matches!(
+                    mouse.kind,
+                    MouseEventKind::Down(_) | MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+                )
+            {
+                self.focus_other_pane();
+            }
         }
 
         // Tab bar click detection (its own row above the editor block)

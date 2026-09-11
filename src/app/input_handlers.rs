@@ -1,4 +1,4 @@
-use super::App;
+use super::{App, SplitDirection};
 use std::io;
 
 use ratatui::crossterm::event::{
@@ -469,6 +469,11 @@ impl App {
                 self.open_project_search_prompt();
             }
             KeyAction::GitDiff => self.open_diff_view(),
+            KeyAction::SplitVertical => self.split_pane(SplitDirection::Vertical),
+            KeyAction::SplitHorizontal => self.split_pane(SplitDirection::Horizontal),
+            KeyAction::FocusOtherPane => self.focus_other_pane(),
+            KeyAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
+            KeyAction::ClosePane => self.close_pane(),
             KeyAction::GitNextChange => self.jump_to_change(true),
             KeyAction::GitPrevChange => self.jump_to_change(false),
             KeyAction::GoToLine => {

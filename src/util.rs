@@ -66,6 +66,11 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::Keybinds => "Keybind Editor",
         CommandAction::ToggleWordWrap => "Toggle Word Wrap",
         CommandAction::GitDiff => "Git Diff (current file)",
+        CommandAction::SplitVertical => "Split Editor Vertically",
+        CommandAction::SplitHorizontal => "Split Editor Horizontally",
+        CommandAction::FocusOtherPane => "Focus Other Pane",
+        CommandAction::MoveTabToOtherPane => "Move Tab to Other Pane",
+        CommandAction::ClosePane => "Close Pane",
     }
 }
 
