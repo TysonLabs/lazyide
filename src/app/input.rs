@@ -269,6 +269,11 @@ impl App {
             return Ok(());
         }
 
+        // A minimap drag ends on any left-button release, wherever it lands.
+        if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
+            self.minimap_dragging = false;
+        }
+
         // Split divider: drag to resize the two panes.
         if self.is_split() {
             match mouse.kind {
@@ -359,10 +364,6 @@ impl App {
                     {
                         let row = mouse.row.clamp(mm.y, mm.bottom().saturating_sub(1));
                         self.scroll_to_minimap_row((row - mm.y) as usize);
-                        return Ok(());
-                    }
-                    MouseEventKind::Up(MouseButton::Left) if self.minimap_dragging => {
-                        self.minimap_dragging = false;
                         return Ok(());
                     }
                     _ => {}

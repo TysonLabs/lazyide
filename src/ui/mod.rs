@@ -776,10 +776,11 @@ fn render_minimap(
 
     let height = area.height as usize;
     let width = area.width as usize;
-    if height == 0 || width < 2 {
+    if height == 0 || width == 0 {
         return;
     }
-    let bar_cols = width - 1; // one-column gap on the left
+    // editor_inner_rect already leaves a one-column gap before this rect.
+    let bar_cols = width;
     let total = if has_tab { lines.len() } else { 0 };
     let lpr = lines_per_row(total, height);
     // Viewport in source lines → minimap rows.
@@ -814,7 +815,6 @@ fn render_minimap(
         };
         let base = Style::default().bg(row_bg);
         out.push(Line::from(vec![
-            Span::styled(" ", base),
             Span::styled("━".repeat(w), base.fg(bar_fg)),
             Span::styled(" ".repeat(bar_cols - w), base),
         ]));

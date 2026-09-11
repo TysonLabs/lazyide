@@ -46,6 +46,7 @@ impl App {
         self.editor_dragging = false;
         self.editor_drag_anchor = None;
         self.gutter_drag_anchor = None;
+        self.minimap_dragging = false;
         self.focus = Focus::Editor;
         let name = self
             .open_path()
