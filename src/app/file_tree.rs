@@ -60,7 +60,15 @@ impl App {
         Ok(dest)
     }
 
-    fn close_tabs_for_path_prefix(&mut self, path: &Path) {
+    /// Close every tab under `path` in both panes (the focused pane last so
+    /// focus bookkeeping in `close_tab_at` applies to it).
+    pub(crate) fn close_tabs_for_path_prefix(&mut self, path: &Path) {
+        let p = path.to_path_buf();
+        self.with_other_pane_focused(|app| app.close_focused_tabs_for_path_prefix(&p));
+        self.close_focused_tabs_for_path_prefix(path);
+    }
+
+    fn close_focused_tabs_for_path_prefix(&mut self, path: &Path) {
         let mut indices: Vec<usize> = self
             .tabs
             .iter()

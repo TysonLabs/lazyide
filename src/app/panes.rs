@@ -131,6 +131,17 @@ impl App {
         self.set_status(format!("Moved {name} to the other pane"));
     }
 
+    /// Run `f` with the other pane swapped in as the focused group, then
+    /// swap back. No-op when not split.
+    pub(crate) fn with_other_pane_focused(&mut self, f: impl FnOnce(&mut App)) {
+        if !self.is_split() {
+            return;
+        }
+        self.swap_pane_state();
+        f(self);
+        self.swap_pane_state();
+    }
+
     /// Index of a tab open in the other pane, if any.
     pub(crate) fn other_pane_tab_index(&self, path: &std::path::Path) -> Option<usize> {
         self.other_pane
@@ -179,8 +190,10 @@ impl App {
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Percentage(ratio), Constraint::Min(3)])
                     .split(column);
-                // The second pane's tab row doubles as the drag handle.
-                let divider = Rect::new(parts[1].x, parts[1].y, parts[1].width, 1);
+                // The upper pane's bottom border row is the drag handle; the
+                // lower pane's tab row directly below must stay clickable.
+                let handle_y = parts[0].bottom().saturating_sub(1);
+                let divider = Rect::new(parts[0].x, handle_y, parts[0].width, 1);
                 (parts[0], parts[1], divider)
             }
         }
@@ -296,7 +309,26 @@ mod tests {
         let (first, second, divider) = app.pane_layout(Rect::new(0, 0, 100, 40));
         assert_eq!(first.height, 20);
         assert_eq!(second.y, 20);
-        assert_eq!(divider, Rect::new(0, 20, 100, 1));
+        // Handle sits on the upper pane's bottom border, not the lower tab row.
+        assert_eq!(divider, Rect::new(0, 19, 100, 1));
+    }
+
+    #[test]
+    fn deleting_a_path_closes_matching_tabs_in_both_panes() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("dir")).unwrap();
+        let mut app = app_with_files(root, &["dir/a.rs", "dir/b.rs", "keep.rs"]);
+        app.open_file(root.join("dir/a.rs")).unwrap();
+        app.split_pane(SplitDirection::Vertical);
+        app.focus_other_pane();
+        app.open_file(root.join("dir/b.rs")).unwrap();
+        app.open_file(root.join("keep.rs")).unwrap();
+        assert_eq!(app.all_tabs().count(), 3);
+
+        app.close_tabs_for_path_prefix(&root.join("dir"));
+        assert_eq!(app.all_tabs().count(), 1);
+        assert_eq!(app.all_tabs().next().unwrap().path, root.join("keep.rs"));
     }
 
     #[test]

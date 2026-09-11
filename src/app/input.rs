@@ -201,8 +201,9 @@ impl App {
                         let desired = mouse.column.saturating_sub(self.tree_rect.x);
                         self.files_pane_width = desired.max(Self::MIN_FILES_PANE_WIDTH);
                         self.clamp_files_pane_width(
-                            // The divider column lives inside editor_rect now.
-                            self.editor_rect.width + self.tree_rect.width,
+                            // The divider column lives inside the editor column,
+                            // which may be split into two panes.
+                            self.editor_column_rect.width + self.tree_rect.width,
                         );
                         return Ok(());
                     }
