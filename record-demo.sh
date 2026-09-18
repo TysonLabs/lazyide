@@ -1,17 +1,29 @@
 #!/bin/sh
-# Record the lazyide demo — sets up state then runs VHS
+# Record the lazyide demo: swap in demo settings, run VHS, restore yours.
 set -eu
 
-# Pre-set narrow file pane and starting theme
-mkdir -p ~/.config/lazyide
-cat > ~/.config/lazyide/state.json << 'EOF'
-{"theme_name":"One Dark Pro","files_pane_width":28,"word_wrap":false}
-EOF
+STATE="$HOME/.config/lazyide/state.json"
+BACKUP="$STATE.demo-backup"
+mkdir -p "$(dirname "$STATE")"
+[ -f "$STATE" ] && cp "$STATE" "$BACKUP"
+restore() {
+    if [ -f "$BACKUP" ]; then
+        mv "$BACKUP" "$STATE"
+    else
+        rm -f "$STATE"
+    fi
+}
+trap restore EXIT
 
-# Clean autosave
-rm -f ~/.config/lazyide/autosave/*.autosave
+# Demo settings: One Dark Pro, narrow file pane, no wrap, minimap on
+printf '%s\n' '{"theme_name":"One Dark Pro","files_pane_width":28,"word_wrap":false,"minimap":true}' > "$STATE"
 
-# Record
+# Clean autosave so no recovery prompts appear
+for f in "$HOME/.config/lazyide/autosave/"*.autosave; do
+    [ -e "$f" ] && rm -f "$f"
+done
+
+cargo build --release
 vhs demo.tape
 
-echo "Done! Output: demo.gif + demo.mp4"
+echo "Done! Output: demo.gif + demo.mp4 + demo.png"
