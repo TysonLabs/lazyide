@@ -5,7 +5,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/TysonLabs/lazyide/ci.yml?label=ci)](https://github.com/TysonLabs/lazyide/actions)
 ![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos%20%7C%20windows-brightgreen)
 
-A lightweight terminal IDE built with Rust and [ratatui](https://ratatui.rs). File tree, tabbed editing, LSP, syntax highlighting, code folding, git integration, project search, 32 themes, and customizable keybindings — all in a single binary.
+A lightweight terminal IDE built with Rust and [ratatui](https://ratatui.rs). File tree, tabbed editing, split panes, LSP, syntax highlighting, code folding, git diff view, minimap, project search, 32 themes, and customizable keybindings — all in a single binary.
 
 A full IDE experience anywhere you have a terminal. SSH into a server, run `lazyide`, and pair with your agentic coding tool.
 
@@ -35,8 +35,9 @@ irm https://tysonlabs.dev/lazyide/install.ps1 | iex
 
 **Homebrew (macOS):**
 ```bash
-brew tap TysonLabs/tap && brew install lazyide
+brew tap TysonLabs/tap && brew trust TysonLabs/tap && brew install lazyide
 ```
+Homebrew 7 refuses formulae from third-party taps until you trust them once; `brew trust` is a no-op on older Homebrew. Upgrade later with `brew upgrade lazyide`.
 
 **Scoop (Windows):**
 ```powershell

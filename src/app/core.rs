@@ -512,14 +512,18 @@ impl App {
             CommandAction::ClosePane,
             CommandAction::ToggleMinimap,
         ];
-        let q = self.menu_query.to_ascii_lowercase();
+        // Every whitespace-separated word must appear in the label, so
+        // "split vert" finds "Split Editor Vertically".
+        let words: Vec<String> = self
+            .menu_query
+            .split_whitespace()
+            .map(|w| w.to_ascii_lowercase())
+            .collect();
         self.menu_results = all
             .into_iter()
             .filter(|a| {
-                q.is_empty()
-                    || command_action_label(*a)
-                        .to_ascii_lowercase()
-                        .contains(q.as_str())
+                let label = command_action_label(*a).to_ascii_lowercase();
+                words.iter().all(|w| label.contains(w.as_str()))
             })
             .collect();
         self.menu_index = self
@@ -1029,6 +1033,27 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn palette_matches_every_query_word_as_substring() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = App::new(tmp.path().to_path_buf()).unwrap();
+        app.menu_query = "split vert".to_string();
+        app.refresh_menu_results();
+        assert_eq!(
+            app.menu_results,
+            vec![crate::types::CommandAction::SplitVertical]
+        );
+        app.menu_query = "pane".to_string();
+        app.refresh_menu_results();
+        assert!(app.menu_results.len() >= 3);
+        app.menu_query = "zzz".to_string();
+        app.refresh_menu_results();
+        assert!(app.menu_results.is_empty());
+        app.menu_query.clear();
+        app.refresh_menu_results();
+        assert!(app.menu_results.len() > 10);
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;
