@@ -173,8 +173,21 @@ impl App {
         }
     }
 
+    /// True (and forgets it) when `path` now holds exactly the file the last
+    /// run wrote: the watcher then leaves the run's status message alone.
+    pub(crate) fn take_run_result(&mut self, path: &Path, disk_digest: u64) -> bool {
+        let hit = self
+            .last_run_result
+            .as_ref()
+            .is_some_and(|(p, d)| p == path && *d == disk_digest);
+        if hit {
+            self.last_run_result = None;
+        }
+        hit
+    }
+
     fn finish_notebook_run(
-        &self,
+        &mut self,
         run: &NotebookRun,
         status: io::Result<std::process::ExitStatus>,
     ) -> String {
@@ -225,6 +238,7 @@ impl App {
             let _ = fs::remove_file(&run.tmp);
             return format!("Run of {name} finished, but writing it failed: {e}");
         }
+        self.last_run_result = Some((run.path.clone(), digest(&result)));
         // Report from the written file's outputs, never from the exit code.
         let errors = std::str::from_utf8(&result)
             .ok()
@@ -419,6 +433,36 @@ mod tests {
         assert_eq!(tab.editor.lines().join("\n"), before);
         let doc = tab.notebook.as_ref().unwrap();
         assert_eq!(doc.disk_digest(), digest(EXECUTED_NB.as_bytes()));
+        // The watcher loads the run's own result without replacing its status.
+        assert!(app.status.starts_with("Run finished in "), "{}", app.status);
+    }
+
+    #[test]
+    fn run_error_status_survives_watcher_on_tab_edited_during_run() {
+        let (_t, mut app, _nb) = setup(r#"cp errored.json "$7""#);
+        app.run_notebook();
+        app.mark_dirty();
+        wait_for_runs(&mut app);
+        assert_eq!(app.status, "Run finished: cell 2 raised KeyError");
+        app.maybe_flag_external_conflict().unwrap();
+        assert_eq!(app.status, "Run finished: cell 2 raised KeyError");
+        let tab = &app.tabs[0];
+        assert!(!tab.conflict_prompt_open);
+        let errors = tab.notebook.as_ref().unwrap().error_cells();
+        assert_eq!(errors, vec![(1, "KeyError".to_string())]);
+    }
+
+    #[test]
+    fn later_external_output_change_still_reports_after_run() {
+        let (_t, mut app, nb) = setup(r#"cp executed.json "$7""#);
+        app.run_notebook();
+        wait_for_runs(&mut app);
+        app.reload_open_file_from_disk_if_pristine().unwrap();
+        assert!(app.status.starts_with("Run finished in "), "{}", app.status);
+        // A second, unrelated outputs-only change is reported as usual.
+        let errored = fs::read_to_string(nb.with_file_name("errored.json")).unwrap();
+        fs::write(&nb, errored).unwrap();
+        app.reload_open_file_from_disk_if_pristine().unwrap();
         assert_eq!(app.status, "Notebook outputs updated on disk");
     }
 

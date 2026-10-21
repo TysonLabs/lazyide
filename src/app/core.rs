@@ -167,6 +167,7 @@ impl App {
             git_thread_handle: None,
             cached_file_list: Vec::new(),
             notebook_runs: Vec::new(),
+            last_run_result: None,
             jupyter_cmd: vec!["jupyter".to_string()],
         };
         app.git_branch = detect_git_branch(&app.root);

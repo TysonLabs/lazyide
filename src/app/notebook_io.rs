@@ -206,7 +206,8 @@ impl App {
         let Some(doc) = self.tabs[idx].notebook.as_ref() else {
             return Ok(());
         };
-        if notebook::digest(disk_text.as_bytes()) == doc.disk_digest() {
+        let disk_digest = notebook::digest(disk_text.as_bytes());
+        if disk_digest == doc.disk_digest() {
             return Ok(());
         }
         let old_tokens = doc.tokens();
@@ -219,7 +220,9 @@ impl App {
                     let tab = &mut self.tabs[idx];
                     tab.notebook = Some(same);
                     tab.open_disk_snapshot = Some(disk_text);
-                    self.set_status("Notebook outputs updated on disk");
+                    if !self.take_run_result(path, disk_digest) {
+                        self.set_status("Notebook outputs updated on disk");
+                    }
                     return Ok(());
                 }
                 let shown = fresh.projected_text().to_string();
@@ -246,12 +249,13 @@ impl App {
     /// `conflict_disk_text` holds the raw disk JSON for `R`.
     pub(crate) fn flag_notebook_conflict(&mut self, path: &Path) -> io::Result<()> {
         let disk_text = read_lossy(path)?;
+        let disk_digest = notebook::digest(disk_text.as_bytes());
         let tab = &mut self.tabs[self.active_tab];
         let Some(doc) = tab.notebook.as_mut() else {
             return Ok(());
         };
         // Our own save, or a version the user already chose to overwrite.
-        if notebook::digest(disk_text.as_bytes()) == doc.disk_digest()
+        if disk_digest == doc.disk_digest()
             || tab.open_disk_snapshot.as_deref() == Some(disk_text.as_str())
         {
             return Ok(());
@@ -260,7 +264,9 @@ impl App {
             Ok(disk) if doc.outputs_only_change(&disk) => {
                 doc.adopt_disk_outputs(disk);
                 tab.open_disk_snapshot = Some(disk_text);
-                self.set_status("Notebook outputs updated on disk");
+                if !self.take_run_result(path, disk_digest) {
+                    self.set_status("Notebook outputs updated on disk");
+                }
             }
             _ => {
                 tab.conflict_prompt_open = true;
