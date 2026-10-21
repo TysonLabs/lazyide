@@ -70,7 +70,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Syntax highlighting** — Rust, Python, JS/TS, Go, PHP, CSS/SCSS, HTML/XML, Shell, JSON/TOML/YAML, Markdown
 - **Code folding** — brace-based (Rust, JS, Go), indentation-based (Python), tag-based (HTML/XML)
 - **Bracket pair colorization** — `{}` `()` `[]` colored by nesting depth
-- **Find & replace** — regex search in file, ripgrep-powered project search
+- **Find & replace** — regex search in file, ripgrep-powered project search. Jupyter notebooks (`.ipynb`) are searched by their cell text, so a hit jumps to the matching line of the cell view; outputs and metadata are not searched. A notebook that cannot be shown as cells is searched as raw JSON. At most 500 notebooks are searched per query; the status bar says how many were skipped. If ripgrep reports an error (for example an invalid regex), the status bar shows it
 - **Word wrap** — toggle with `Alt+Z`, with full cursor/selection/mouse support
 - **Horizontal scrolling** — `Shift+scroll` when word wrap is off
 
