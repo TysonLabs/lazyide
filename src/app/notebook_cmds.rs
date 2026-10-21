@@ -147,7 +147,26 @@ impl App {
             }
             new_lines.push(converted);
         }
-        let new_col = if (marker_row..=body_end).contains(&row) {
+        let new_col = if row == marker_row {
+            // The type tag is inserted or removed after the unchanged `# %%`
+            // stem. Keep a cursor in that stem where it is, and keep a cursor
+            // in the token suffix attached to the same suffix.
+            let tag_width = |kind| match kind {
+                CellKind::Code => 0,
+                CellKind::Markdown => " [markdown]".len(),
+                CellKind::Raw => " [raw]".len(),
+            };
+            let stem_width = "# %%".len();
+            let old_tag_width = tag_width(kind);
+            let new_tag_width = tag_width(to);
+            if col < stem_width {
+                col
+            } else if col <= stem_width + old_tag_width {
+                stem_width + new_tag_width
+            } else {
+                col - old_tag_width + new_tag_width
+            }
+        } else if (marker_row..=body_end).contains(&row) {
             let delta = new_lines[row - marker_row].chars().count() as isize
                 - lines[row].chars().count() as isize;
             (col as isize + delta).max(0) as usize
@@ -417,6 +436,18 @@ mod tests {
             )
         );
         assert_eq!(lines(&app), before);
+    }
+
+    #[test]
+    fn toggle_cell_type_keeps_a_cursor_at_the_start_of_the_marker() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, _) = notebook_app(tmp.path());
+        let marker = marker_rows(&app)[1];
+        jump(&mut app, marker, 0);
+
+        app.notebook_toggle_cell_type();
+
+        assert_eq!(cursor(&app), (marker, 0));
     }
 
     #[test]

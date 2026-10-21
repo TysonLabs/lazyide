@@ -339,6 +339,24 @@ mod tests {
     }
 
     #[test]
+    fn notebook_cell_status_marks_an_added_blank_line_as_edited() {
+        let tmp = tempdir().expect("tempdir");
+        let mut app = open_notebook_for_status_test(tmp.path());
+        let last_marker = *marker_rows(&app).last().expect("marker");
+        status_at(&mut app, last_marker + 1);
+
+        // The final cell starts with no body lines. Enter adds one empty body
+        // line before the buffer's trailing line, which rebuild saves as a
+        // source newline and must therefore count as an edit.
+        app.active_tab_mut().expect("tab").editor.insert_newline();
+
+        assert_eq!(
+            notebook_cell_status(app.active_tab().expect("tab")),
+            Some("cell 7/7 · edited".to_string())
+        );
+    }
+
+    #[test]
     fn center_content_appends_the_cell_and_keeps_status_priority() {
         let tmp = tempdir().expect("tempdir");
         let mut app = open_notebook_for_status_test(tmp.path());

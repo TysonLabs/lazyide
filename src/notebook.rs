@@ -188,8 +188,9 @@ impl NotebookDoc {
     }
     /// Projected visible text (without the marker line) of the cell that owns
     /// `token`, used to show "edited, outputs stale". The body lines exactly
-    /// as projected (markdown/raw with `# `), joined with `\n`, without the
-    /// blank separator line before the next marker.
+    /// as projected (markdown/raw with `# `), without the blank separator
+    /// line before the next marker. A final empty body line is represented by
+    /// a trailing `\n`, so this comparison distinguishes it from no body.
     pub(crate) fn cell_visible_text(&self, token: &str) -> Option<&str> {
         self.index_of(token).map(|i| self.cells[i].text.as_str())
     }
@@ -445,7 +446,7 @@ fn parse_cell(raw: &RawValue, i: usize, nbformat_minor: u64) -> Result<Cell, Not
     if cell.lines.iter().any(|l| is_marker_like(l)) {
         return Err(NotebookOpenError::MarkerCollision { cell_index: i });
     }
-    cell.text = cell.lines.join("\n");
+    cell.text = visible_cell_text(&cell.lines);
     if kind == CellKind::Code {
         let outputs = field(&fields, "outputs")
             .and_then(|o| serde_json::from_str::<Vec<Box<RawValue>>>(o.get()).ok())
@@ -907,7 +908,18 @@ pub(crate) fn buffer_cell_text(lines: &[String], marker: usize, end: usize) -> S
     {
         body = rest;
     }
-    body.join("\n")
+    visible_cell_text(body)
+}
+
+/// Join body lines without losing a final empty line. Plain `join("\n")`
+/// maps both no lines and one empty line to the same string, even though
+/// `rebuild` treats those as different cell sources.
+fn visible_cell_text(lines: &[String]) -> String {
+    let mut text = lines.join("\n");
+    if lines.last().is_some_and(String::is_empty) {
+        text.push('\n');
+    }
+    text
 }
 
 /// Change-detection digest of raw file bytes (not a security hash).
