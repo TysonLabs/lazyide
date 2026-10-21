@@ -69,4 +69,7 @@ pub(crate) struct Tab {
     pub(crate) recovery_prompt_open: bool,
     pub(crate) recovery_text: Option<String>,
     pub(crate) git_line_status: Vec<GitLineStatus>,
+    /// Set when this tab shows a projected notebook; None for raw text (incl. .ipynb fallback).
+    #[allow(dead_code)] // TEMPORARY (skeleton): removed once open_file_as reads it.
+    pub(crate) notebook: Option<crate::notebook::NotebookDoc>,
 }

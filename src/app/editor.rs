@@ -390,6 +390,7 @@ impl App {
             recovery_prompt_open: false,
             recovery_text: None,
             git_line_status,
+            notebook: None,
         };
 
         // If opening as preview, replace existing preview tab
