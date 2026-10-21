@@ -220,28 +220,17 @@ mod tests {
 
     use super::App;
     use crate::keybinds::KeyAction;
-    use crate::notebook::{project, rebuild};
+    use crate::notebook::rebuild;
     use crate::types::CommandAction;
-    use crate::util::text_to_lines;
 
     const EXECUTED: &str = include_str!("../notebook/testdata/lab45_executed.ipynb");
-
-    /// Slice E stand-in for the notebook open path (slice B): open the file,
-    /// then load its projection as the tab's notebook and text.
-    fn open_notebook_for_cmds_test(app: &mut App, path: &Path) {
-        app.open_file(path.to_path_buf()).expect("open");
-        let doc = project(&fs::read_to_string(path).expect("read")).expect("project");
-        let lines = text_to_lines(doc.projected_text());
-        app.active_tab_mut().expect("tab").notebook = Some(doc);
-        app.replace_editor_text(lines, (0, 0));
-        app.active_tab_mut().expect("tab").dirty = false;
-    }
 
     fn notebook_app(root: &Path) -> (App, PathBuf) {
         let path = root.join("nb.ipynb");
         fs::write(&path, EXECUTED).expect("write");
         let mut app = App::new(root.to_path_buf()).expect("app");
-        open_notebook_for_cmds_test(&mut app, &path);
+        app.open_file(path.clone()).expect("open");
+        assert!(app.active_tab().expect("tab").is_notebook());
         (app, path)
     }
 
@@ -476,7 +465,7 @@ mod tests {
 
         // A reload (a fresh projection of the file) drops the pending clear.
         app.close_file();
-        open_notebook_for_cmds_test(&mut app, &path);
+        app.open_file(path).expect("open");
         let tab = app.active_tab().expect("tab");
         let doc = tab.notebook.as_ref().expect("doc");
         assert!(!doc.clear_outputs_pending());
@@ -560,5 +549,145 @@ mod tests {
         app.handle_editor_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT))
             .expect("key");
         assert_eq!(marker_rows(&app).len(), 8);
+    }
+
+    /// End to end through `save_file` (rebuild + token insertion).
+    #[test]
+    fn insert_and_clear_outputs_reach_disk_on_save() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, path) = notebook_app(tmp.path());
+        let orig = original_cells();
+        let m = marker_rows(&app);
+        jump(&mut app, m[1] + 1, 0);
+        app.notebook_insert_cell_below();
+        app.active_tab_mut()
+            .expect("tab")
+            .editor
+            .insert_str("z = 3");
+        app.save_file().expect("save");
+        let new_marker = &lines(&app)[marker_rows(&app)[2]];
+        assert!(
+            new_marker.len() == "# %% #".len() + 6 && new_marker.starts_with("# %% #"),
+            "{new_marker}"
+        );
+        let on_disk = |path: &Path| -> Vec<Value> {
+            let root: Value =
+                serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("json");
+            root["cells"].as_array().expect("cells").clone()
+        };
+        let cells = on_disk(&path);
+        assert_eq!(cells.len(), orig.len() + 1);
+        assert_eq!(cells[2]["source"], Value::Array(vec!["z = 3".into()]));
+        assert_eq!(&cells[..2], &orig[..2]);
+        assert_eq!(&cells[3..], &orig[2..]);
+
+        app.run_command_action(CommandAction::NotebookClearOutputs)
+            .expect("clear");
+        app.save_file().expect("save");
+        let cells = on_disk(&path);
+        assert_eq!(cells.len(), orig.len() + 1);
+        for cell in &cells {
+            if cell["cell_type"] == "code" {
+                assert_eq!(cell["outputs"], Value::Array(vec![]));
+                assert_eq!(cell["execution_count"], Value::Null);
+            }
+        }
+        assert_eq!(cells[0], orig[0]);
+        assert!(!app.active_tab().expect("tab").dirty);
+    }
+
+    /// Palette guardrail: a user who never opens a notebook sees the palette
+    /// as it was before notebooks existed.
+    #[test]
+    fn palette_shows_notebook_entries_only_where_they_apply() {
+        use CommandAction as C;
+        let before_notebooks = vec![
+            C::Theme,
+            C::Help,
+            C::QuickOpen,
+            C::FindInFile,
+            C::FindInProject,
+            C::SaveFile,
+            C::RefreshTree,
+            C::ToggleFiles,
+            C::GotoDefinition,
+            C::ReplaceInFile,
+            C::GoToLine,
+            C::Keybinds,
+            C::ToggleWordWrap,
+            C::GitDiff,
+            C::SplitVertical,
+            C::SplitHorizontal,
+            C::FocusOtherPane,
+            C::MoveTabToOtherPane,
+            C::ClosePane,
+            C::ToggleMinimap,
+        ];
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, _) = notebook_app(tmp.path());
+        let palette = |app: &mut App| {
+            app.open_command_palette();
+            app.menu_open = false;
+            app.menu_results.clone()
+        };
+
+        let mut notebook = before_notebooks.clone();
+        notebook.extend([
+            C::NotebookNextCell,
+            C::NotebookPrevCell,
+            C::NotebookInsertCellBelow,
+            C::NotebookToggleCellType,
+            C::NotebookClearOutputs,
+            C::ReopenAsRawJson,
+            C::NotebookRunAll,
+            C::NotebookStopRun,
+        ]);
+        assert_eq!(palette(&mut app), notebook);
+
+        let rs = tmp.path().join("a.rs");
+        fs::write(&rs, "fn main() {}\n").expect("write");
+        app.open_file(rs).expect("open");
+        assert_eq!(palette(&mut app), before_notebooks);
+
+        let raw = tmp.path().join("raw.ipynb");
+        fs::write(&raw, "not json\n").expect("write");
+        app.open_file(raw).expect("open");
+        assert!(!app.active_tab().expect("tab").is_notebook());
+        let mut raw_ipynb = before_notebooks.clone();
+        raw_ipynb.push(C::ReopenAsNotebook);
+        assert_eq!(palette(&mut app), raw_ipynb);
+
+        let mut empty = App::new(tmp.path().to_path_buf()).expect("app");
+        assert_eq!(palette(&mut empty), before_notebooks);
+    }
+
+    /// A run outlives its tab, so "Notebook: Stop run" stays listed on any
+    /// tab while a run is active.
+    #[test]
+    fn palette_lists_stop_run_while_a_run_is_active() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, _) = notebook_app(tmp.path());
+        let script = tmp.path().join("fake_jupyter.sh");
+        fs::write(&script, "#!/bin/sh\nexec sleep 30\n").expect("write");
+        app.jupyter_cmd = vec!["sh".to_string(), script.display().to_string()];
+        app.run_notebook();
+        assert_eq!(app.notebook_runs.len(), 1);
+        let rs = tmp.path().join("a.rs");
+        fs::write(&rs, "fn main() {}\n").expect("write");
+        app.open_file(rs).expect("open");
+        app.open_command_palette();
+        assert_eq!(
+            app.menu_results.last(),
+            Some(&CommandAction::NotebookStopRun)
+        );
+        app.stop_notebook_run();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !app.notebook_runs.is_empty() && std::time::Instant::now() < deadline {
+            app.poll_notebook_runs();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(app.notebook_runs.is_empty());
+        app.open_command_palette();
+        assert!(!app.menu_results.contains(&CommandAction::NotebookStopRun));
     }
 }

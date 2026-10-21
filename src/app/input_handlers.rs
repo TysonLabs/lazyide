@@ -868,10 +868,16 @@ impl App {
     }
 
     pub(crate) fn handle_conflict_prompt_key(&mut self, key: KeyEvent) -> io::Result<()> {
+        // Notebook tabs keep their old doc as the save base on K/D/Esc, so
+        // the next save overwrites the disk version.
+        let notebook = self.active_tab().is_some_and(|t| t.is_notebook());
+        let kept_notebook = "Kept local version; saving will overwrite the notebook on disk";
         match (key.modifiers, key.code) {
             (_, KeyCode::Char('r')) | (_, KeyCode::Char('R')) => {
                 let disk = self.active_tab().and_then(|t| t.conflict_disk_text.clone());
-                if let Some(disk) = disk {
+                if notebook && let Some(disk) = disk {
+                    self.reload_notebook_from_conflict(disk);
+                } else if let Some(disk) = disk {
                     let lines = text_to_lines(&disk);
                     let cursor = self.tabs[self.active_tab].editor.cursor();
                     self.replace_editor_text(lines, cursor);
@@ -896,7 +902,11 @@ impl App {
                     tab.conflict_prompt_open = false;
                     tab.conflict_disk_text = None;
                 }
-                self.set_status("Keeping local edits");
+                self.set_status(if notebook {
+                    kept_notebook
+                } else {
+                    "Keeping local edits"
+                });
             }
             (_, KeyCode::Char('d')) | (_, KeyCode::Char('D')) | (_, KeyCode::Esc) => {
                 if let Some(tab) = self.active_tab_mut() {
@@ -906,7 +916,11 @@ impl App {
                     tab.conflict_prompt_open = false;
                     tab.conflict_disk_text = None;
                 }
-                self.set_status("Conflict deferred");
+                self.set_status(if notebook {
+                    kept_notebook
+                } else {
+                    "Conflict deferred"
+                });
             }
             _ => {}
         }

@@ -80,6 +80,10 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::NotebookInsertCellBelow => "Notebook: Insert cell below",
         CommandAction::NotebookToggleCellType => "Notebook: Toggle markdown/code",
         CommandAction::NotebookClearOutputs => "Notebook: Clear all outputs",
+        CommandAction::ReopenAsRawJson => "Reopen as raw JSON",
+        CommandAction::ReopenAsNotebook => "Reopen as notebook",
+        CommandAction::NotebookRunAll => "Notebook: Run all (nbconvert)",
+        CommandAction::NotebookStopRun => "Notebook: Stop run",
     }
 }
 

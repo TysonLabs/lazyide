@@ -10,9 +10,10 @@ use ratatui::style::Style;
 use ratatui_textarea::TextArea;
 use serde_json::json;
 
+use super::notebook_io::is_ipynb_path;
 use crate::keybinds::{KeyAction, KeyScope};
-use crate::notebook::NotebookDoc;
-use crate::persistence::autosave_path_for;
+use crate::notebook;
+use crate::persistence::{autosave_path_for, nbtokens_path_for};
 use crate::tab::{Tab, tab_syntax_lang};
 use crate::types::{EditorContextAction, Focus, PendingAction, SaveOutcome};
 use crate::util::{
@@ -346,13 +347,23 @@ impl App {
             return Ok(());
         }
         let text = String::from_utf8_lossy(&bytes).to_string();
-        let mut ta = TextArea::from(text_to_lines(&text));
+        // A `.ipynb` opens as projected cell text; one that does not project
+        // opens as raw JSON (`notebook: None`), exactly like any text file.
+        let (notebook, raw_reason) = if is_ipynb_path(&path) {
+            match notebook::project(&text) {
+                Ok(doc) => (Some(doc), None),
+                Err(e) => (None, Some(e.to_string())),
+            }
+        } else {
+            (None, None)
+        };
+        let shown = notebook
+            .as_ref()
+            .map_or(text.as_str(), |d| d.projected_text());
+        let mut ta = TextArea::from(text_to_lines(shown));
         ta.set_cursor_line_style(Style::default().bg(self.active_theme().bg_alt));
         ta.set_selection_style(Style::default().bg(self.active_theme().selection));
 
-        // Notebook projection is wired in by the open slice; until then every
-        // tab opens as raw text.
-        let notebook: Option<NotebookDoc> = None;
         let lang = tab_syntax_lang(&path, notebook.as_ref());
         let (fold_ranges, bracket_depths) =
             compute_tab_fold_ranges(ta.lines(), lang, notebook.is_some());
@@ -397,6 +408,7 @@ impl App {
             git_line_status,
             notebook,
             reformat_confirmed: false,
+            recovery_tokens_stale: false,
         };
 
         // If opening as preview, replace existing preview tab
@@ -419,10 +431,11 @@ impl App {
         self.completion.reset();
         self.ensure_lsp_for_path(&path);
         self.check_recovery_for_open_file();
-        self.set_status(format!(
-            "Opened {}",
-            relative_path(&self.root, &path).display()
-        ));
+        let rel = relative_path(&self.root, &path).display().to_string();
+        match raw_reason {
+            Some(reason) => self.set_status(format!("Opened {rel} as raw JSON: {reason}")),
+            None => self.set_status(format!("Opened {rel}")),
+        }
         Ok(())
     }
 
@@ -435,6 +448,13 @@ impl App {
             return Ok(SaveOutcome::Failed);
         };
         let path = tab.path.clone();
+        if tab.is_notebook() {
+            let outcome = self.save_notebook()?;
+            if outcome == SaveOutcome::Saved {
+                self.after_save(&path);
+            }
+            return Ok(outcome);
+        }
         let mut content = tab.editor.lines().join("\n");
         // Ensure file ends with a trailing newline (POSIX convention)
         if !content.ends_with('\n') {
@@ -445,6 +465,13 @@ impl App {
         tab.open_disk_snapshot = Some(content);
         tab.conflict_prompt_open = false;
         tab.conflict_disk_text = None;
+        self.after_save(&path);
+        Ok(SaveOutcome::Saved)
+    }
+
+    /// Steps shared by every completed save: drop the autosave, refresh git
+    /// promptly and report.
+    fn after_save(&mut self, path: &std::path::Path) {
         self.clear_autosave_for_open_file();
         // Trigger an immediate async git refresh so the gutter updates promptly
         self.fs_refresh_pending = true;
@@ -454,9 +481,8 @@ impl App {
             .unwrap_or_else(Instant::now);
         self.set_status(format!(
             "Saved {}",
-            relative_path(&self.root, &path).display()
+            relative_path(&self.root, path).display()
         ));
-        Ok(SaveOutcome::Saved)
     }
 
     /// Save the active tab and close it only if the save completed. A
@@ -497,6 +523,7 @@ impl App {
         }
         // Clear autosave
         let _ = fs::remove_file(autosave_path_for(&self.tabs[idx].path));
+        let _ = fs::remove_file(nbtokens_path_for(&self.tabs[idx].path));
         self.tabs.remove(idx);
         if self.tabs.is_empty() {
             self.active_tab = 0;

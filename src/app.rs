@@ -31,6 +31,8 @@ mod input;
 mod input_handlers;
 mod lsp;
 mod notebook_cmds;
+mod notebook_io;
+mod notebook_run;
 mod panes;
 mod search;
 
@@ -197,10 +199,15 @@ pub(crate) struct App {
     pub(crate) git_refresh_in_flight: bool,
     pub(crate) git_thread_handle: Option<JoinHandle<()>>,
     pub(crate) cached_file_list: Vec<PathBuf>,
+    pub(crate) notebook_runs: Vec<notebook_run::NotebookRun>,
+    /// Program and leading args for Run notebook (`["jupyter"]`); a seam so
+    /// tests run a fake script instead of Jupyter.
+    pub(crate) jupyter_cmd: Vec<String>,
 }
 
 impl Drop for App {
     fn drop(&mut self) {
+        self.kill_notebook_runs();
         if let Some(handle) = self.git_thread_handle.take() {
             let _ = handle.join();
         }

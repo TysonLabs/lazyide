@@ -258,15 +258,13 @@ fn keybind_hints(kb: &KeyBindings) -> String {
 mod tests {
     use super::{breadcrumbs, center_content, fit_center, notebook_cell_status};
     use crate::app::App;
-    use crate::notebook::project;
-    use crate::util::text_to_lines;
     use std::fs;
     use std::path::Path;
     use std::time::Instant;
     use tempfile::tempdir;
 
-    /// Slice E stand-in for the notebook open path (slice B).
-    fn open_notebook_for_status_test(root: &Path) -> App {
+    /// Open the executed fixture as `analysis.ipynb` (a notebook tab).
+    fn open_executed_notebook(root: &Path) -> App {
         let path = root.join("analysis.ipynb");
         fs::write(
             &path,
@@ -274,12 +272,8 @@ mod tests {
         )
         .expect("write");
         let mut app = App::new(root.to_path_buf()).expect("app");
-        app.open_file(path.clone()).expect("open");
-        let doc = project(&fs::read_to_string(&path).expect("read")).expect("project");
-        let lines = text_to_lines(doc.projected_text());
-        app.active_tab_mut().expect("tab").notebook = Some(doc);
-        app.replace_editor_text(lines, (0, 0));
-        app.active_tab_mut().expect("tab").dirty = false;
+        app.open_file(path).expect("open");
+        assert!(app.active_tab().expect("tab").is_notebook());
         app
     }
 
@@ -300,7 +294,7 @@ mod tests {
     #[test]
     fn notebook_cell_status_summarizes_the_cursor_cell() {
         let tmp = tempdir().expect("tempdir");
-        let mut app = open_notebook_for_status_test(tmp.path());
+        let mut app = open_executed_notebook(tmp.path());
         let m = marker_rows(&app);
         let at = |app: &mut App, row| status_at(app, row).expect("summary");
         assert_eq!(at(&mut app, m[0] + 1), "cell 1/7 · markdown");
@@ -341,7 +335,7 @@ mod tests {
     #[test]
     fn notebook_cell_status_marks_an_added_blank_line_as_edited() {
         let tmp = tempdir().expect("tempdir");
-        let mut app = open_notebook_for_status_test(tmp.path());
+        let mut app = open_executed_notebook(tmp.path());
         let last_marker = *marker_rows(&app).last().expect("marker");
         status_at(&mut app, last_marker + 1);
 
@@ -359,7 +353,7 @@ mod tests {
     #[test]
     fn center_content_appends_the_cell_and_keeps_status_priority() {
         let tmp = tempdir().expect("tempdir");
-        let mut app = open_notebook_for_status_test(tmp.path());
+        let mut app = open_executed_notebook(tmp.path());
         let m = marker_rows(&app);
         status_at(&mut app, m[4] + 1);
         app.status.clear();
