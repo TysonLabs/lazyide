@@ -100,6 +100,61 @@ impl App {
         }
     }
 
+    /// Open tabs at or under `from` (both panes) whose notebook mode would
+    /// change if `from` were renamed to `to`, with their dirty flag. A tab is
+    /// in notebook mode iff `tab.notebook` is set; after the rename it would be
+    /// iff the new extension is `ipynb`. An `.ipynb` renamed to `.ipynb` keeps
+    /// its mode: the content, not the name, decides raw-JSON fallback. Move
+    /// keeps the file name, so it never changes the mode.
+    fn tabs_changing_notebook_mode(&self, from: &Path, to: &Path) -> Vec<(PathBuf, bool)> {
+        let is_ipynb = |p: &Path| {
+            p.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("ipynb"))
+        };
+        self.all_tabs()
+            .filter_map(|tab| {
+                let new_path = if tab.path == from {
+                    to.to_path_buf()
+                } else {
+                    to.join(tab.path.strip_prefix(from).ok()?)
+                };
+                let (was, will) = (is_ipynb(&tab.path), is_ipynb(&new_path));
+                let changes = !(was && will) && tab.notebook.is_some() != will;
+                changes.then(|| (tab.path.clone(), tab.dirty))
+            })
+            .collect()
+    }
+
+    /// Close the tab at `path` and open it again in the same pane and slot,
+    /// so `open_file_as` re-decides its mode. Keeps focus and the active tab.
+    fn reopen_tab_in_place(&mut self, path: &Path) {
+        let reopen = |app: &mut App| {
+            let Some(idx) = app.tabs.iter().position(|t| t.path == path) else {
+                return false;
+            };
+            let was_active = app.active_tab;
+            let is_preview = app.tabs[idx].is_preview;
+            app.close_tab_at(idx);
+            let before = app.tabs.len();
+            let mut active = was_active;
+            if app.open_file_as(path.to_path_buf(), is_preview).is_ok() && app.tabs.len() > before {
+                let tab = app.tabs.remove(app.active_tab);
+                app.tabs.insert(idx, tab);
+            } else if idx < was_active {
+                active -= 1;
+            }
+            app.active_tab = active.min(app.tabs.len().saturating_sub(1));
+            true
+        };
+        let focus = self.focus;
+        if !reopen(self) {
+            self.with_other_pane_focused(|app| {
+                reopen(app);
+            });
+        }
+        self.focus = focus;
+    }
+
     fn retarget_expanded_for_rename(&mut self, from: &Path, to: &Path) {
         let mut moved = Vec::new();
         for p in &self.expanded {
@@ -483,9 +538,28 @@ impl App {
                     self.set_status("Name already exists");
                     return Ok(());
                 }
+                // Notebook mode is decided at open, so a tab whose mode the new
+                // name changes is reopened; a dirty one would lose its edits.
+                let reopen = self.tabs_changing_notebook_mode(&target, &renamed);
+                if let Some(dirty) = reopen.iter().find(|(_, dirty)| *dirty) {
+                    let name = dirty
+                        .0
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    self.set_status(format!("Save {name} before renaming"));
+                    return Ok(());
+                }
                 fs::rename(&target, &renamed)?;
                 self.retarget_tabs_for_rename(&target, &renamed);
                 self.retarget_expanded_for_rename(&target, &renamed);
+                for (old_path, _) in reopen {
+                    let new_path = match old_path.strip_prefix(&target) {
+                        Ok(suffix) if !suffix.as_os_str().is_empty() => renamed.join(suffix),
+                        _ => renamed.clone(),
+                    };
+                    self.reopen_tab_in_place(&new_path);
+                }
                 self.rebuild_tree()?;
                 self.set_status(format!(
                     "Renamed to {}",
@@ -972,5 +1046,107 @@ mod tests {
             app.file_picker_results.len() >= 2,
             "empty query should return all files"
         );
+    }
+
+    fn rename(app: &mut App, target: &Path, name: &str) {
+        app.apply_prompt(
+            PromptMode::Rename {
+                target: target.to_path_buf(),
+            },
+            name.to_string(),
+        )
+        .expect("rename");
+    }
+
+    fn buffer(app: &App, idx: usize) -> String {
+        app.tabs[idx].editor.lines().join("\n")
+    }
+
+    #[test]
+    fn rename_refuses_dirty_tab_whose_notebook_mode_changes() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("a.py");
+        fs::write(&file, "x = 1\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file.clone()).expect("open");
+        app.tabs[0].editor.insert_str("y = 2\n");
+        app.tabs[0].dirty = true;
+
+        rename(&mut app, &file, "a.ipynb");
+
+        assert_eq!(app.status, "Save a.py before renaming");
+        assert_eq!(fs::read_to_string(&file).expect("read"), "x = 1\n");
+        assert!(!root.join("a.ipynb").exists());
+        assert_eq!(app.tabs[0].path, file);
+        assert!(app.tabs[0].dirty);
+    }
+
+    #[test]
+    fn rename_reopens_clean_tab_whose_notebook_mode_changes() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("a.py");
+        let other = root.join("b.rs");
+        fs::write(&file, "old\n").expect("write");
+        fs::write(&other, "fn b() {}\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file.clone()).expect("open a");
+        app.open_file(other.clone()).expect("open b");
+        // Changed on disk behind a clean tab: a reopen picks it up.
+        fs::write(&file, "fresh\n").expect("rewrite");
+
+        rename(&mut app, &file, "a.ipynb");
+
+        let renamed = root.join("a.ipynb");
+        assert!(renamed.exists());
+        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(app.tabs[0].path, renamed);
+        assert_eq!(buffer(&app, 0), "fresh\n");
+        assert_eq!(app.tabs[1].path, other);
+        assert_eq!(app.active_tab, 1);
+        assert_eq!(app.status, "Renamed to a.ipynb");
+    }
+
+    #[test]
+    fn rename_keeping_notebook_mode_does_not_reopen() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("a.py");
+        fs::write(&file, "old\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file.clone()).expect("open");
+        fs::write(&file, "fresh\n").expect("rewrite");
+
+        rename(&mut app, &file, "b.py");
+
+        assert_eq!(app.tabs[0].path, root.join("b.py"));
+        assert_eq!(buffer(&app, 0), "old\n");
+    }
+
+    #[test]
+    fn rename_reopens_tab_in_other_pane() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let file = root.join("a.py");
+        let other = root.join("b.rs");
+        fs::write(&file, "old\n").expect("write");
+        fs::write(&other, "fn b() {}\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file.clone()).expect("open a");
+        app.split_pane(crate::app::SplitDirection::Vertical);
+        app.move_tab_to_other_pane();
+        app.focus_other_pane();
+        app.open_file(other.clone()).expect("open b");
+        fs::write(&file, "fresh\n").expect("rewrite");
+
+        rename(&mut app, &file, "a.ipynb");
+
+        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.tabs[0].path, other);
+        let pane = app.other_pane.as_ref().expect("other pane");
+        assert_eq!(pane.tabs.len(), 1);
+        assert_eq!(pane.tabs[0].path, root.join("a.ipynb"));
+        assert_eq!(pane.tabs[0].editor.lines().join("\n"), "fresh\n");
     }
 }

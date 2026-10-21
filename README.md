@@ -88,7 +88,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Split panes** — two editor panes side by side or stacked, each with its own tab group; move tabs between them, drag the divider
 - **Minimap** — condensed file overview at the editor's right edge with the viewport highlighted; click or drag to scroll, `Alt+I` to toggle
 - **Status bar** — focus mode, git branch with +/- counts, file breadcrumbs, cursor position, diagnostic counts
-- **File tree** — folders-first sorting, expand/collapse, context menus, resizable divider
+- **File tree** — folders-first sorting, expand/collapse, context menus, resizable divider. A rename that adds or removes the `.ipynb` extension of an open file reopens its tab; if that tab has unsaved changes, the rename is refused ("Save x.py before renaming")
 - **Command palette** — `Ctrl+P` for quick access to all actions
 - **Autosave & recovery** — buffers saved every 2s, crash recovery on reopen
 

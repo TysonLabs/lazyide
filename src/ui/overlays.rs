@@ -704,6 +704,21 @@ pub(crate) fn render_delete_prompt(app: &mut App, frame: &mut Frame<'_>) {
     render_dialog(area, "Confirm Delete", text, theme, frame);
 }
 
+pub(crate) fn render_notebook_reformat_prompt(app: &mut App, frame: &mut Frame<'_>) {
+    let theme = app.active_theme();
+    let area = centered_rect(64, 28, frame.area());
+    let text = [
+        NOTEBOOK_REFORMAT_PROMPT,
+        "",
+        "Y: Save",
+        "N or Esc: Cancel (keep editing)",
+    ]
+    .join("\n");
+    render_dialog(area, "Reformat Notebook", text, theme, frame);
+}
+
+pub(crate) const NOTEBOOK_REFORMAT_PROMPT: &str = "Saving will change this notebook's JSON whitespace. Cell contents and outputs are kept. Save? (y/n)";
+
 pub(crate) fn render_conflict_prompt(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme();
     let area = centered_rect(68, 30, frame.area());

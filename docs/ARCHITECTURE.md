@@ -68,10 +68,16 @@ lib.rs: run_app()
 `handle_key()` in `app/input.rs` routes events top-to-bottom by priority:
 
 1. **Modal overlays** (keybind editor, file picker, prompts, completion, search results, context menus, theme browser, command palette, help) — first open modal wins
-2. **Pending actions** (quit confirmation, delete confirmation)
+2. **Pending actions** (`PendingAction`: quit confirmation, close prompt, delete confirmation, notebook reformat prompt)
 3. **Global keybinds** — `keybinds.lookup(key, Global)` -> `run_key_action()`
 4. **Non-remappable keys** (Esc, Tab for focus switch, Delete in tree)
 5. **Focus-specific** — `Focus::Tree` -> `handle_tree_key()`, `Focus::Editor` -> `handle_editor_key()`
+
+Each pending action has key handling in `handle_pending_key()` (`app/input_handlers.rs`), a status hint in `util::pending_hint`, a dialog in `ui/overlays.rs`, and is a mouse modal in `handle_mouse()` (a click outside cancels it).
+
+**Save flow.** `save_file()` returns `SaveOutcome`: `Saved` (the buffer is on disk), `Deferred` (nothing written yet; a prompt asks first) or `Failed` (nothing written, including "No file open"; the status says why). I/O errors stay `Err`. The Save key and the palette Save only save. The close prompt (Enter / Ctrl+S) goes through `save_and_close_file()`, which closes the tab only on `Saved`; on `Deferred` it sets `then_close` on the pending `NotebookReformat` prompt. That prompt asks before a save changes a notebook's JSON whitespace: `y` sets the tab's `reformat_confirmed` (kept for the tab's lifetime), saves, and closes only if `then_close` and the save returned `Saved`; `n` / Esc leaves the tab open and dirty.
+
+**Rename and notebook mode.** A tab's notebook mode (`tab.notebook.is_some()`) is decided when the file opens. Before a tree rename touches disk, `tabs_changing_notebook_mode()` finds open tabs (both panes) at or under the target whose mode the new name would change (to or from an `.ipynb` extension, case-insensitive; `.ipynb` to `.ipynb` keeps the mode). If any is dirty, the rename is refused with "Save <name> before renaming". After the rename, the affected clean tabs are closed and reopened in the same pane and slot, keeping the active tab and focus. Move keeps the file name, so it never changes the mode.
 
 Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling through to `tui_textarea::Input` for basic text editing (arrow keys, typing characters, etc.).
 

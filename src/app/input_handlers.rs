@@ -226,14 +226,12 @@ impl App {
                 if mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT) =>
             {
                 self.pending = PendingAction::None;
-                self.save_file()?;
-                self.close_file();
+                self.save_and_close_file()?;
                 Ok(true)
             }
             (PendingAction::ClosePrompt, KeyModifiers::NONE, KeyCode::Enter) => {
                 self.pending = PendingAction::None;
-                self.save_file()?;
-                self.close_file();
+                self.save_and_close_file()?;
                 Ok(true)
             }
             (PendingAction::ClosePrompt, KeyModifiers::NONE, KeyCode::Esc) => {
@@ -245,6 +243,30 @@ impl App {
             | (PendingAction::ClosePrompt, KeyModifiers::NONE, KeyCode::Char('C')) => {
                 self.pending = PendingAction::None;
                 self.set_status("Close canceled");
+                Ok(true)
+            }
+            (
+                PendingAction::NotebookReformat { then_close },
+                KeyModifiers::NONE,
+                KeyCode::Char('y' | 'Y'),
+            ) => {
+                let then_close = *then_close;
+                self.pending = PendingAction::None;
+                if let Some(tab) = self.active_tab_mut() {
+                    tab.reformat_confirmed = true;
+                }
+                if then_close {
+                    self.save_and_close_file()?;
+                } else {
+                    self.save_file()?;
+                }
+                Ok(true)
+            }
+            (PendingAction::NotebookReformat { .. }, KeyModifiers::NONE, KeyCode::Char('n'))
+            | (PendingAction::NotebookReformat { .. }, KeyModifiers::NONE, KeyCode::Char('N'))
+            | (PendingAction::NotebookReformat { .. }, KeyModifiers::NONE, KeyCode::Esc) => {
+                self.pending = PendingAction::None;
+                self.set_status("Save canceled");
                 Ok(true)
             }
             (PendingAction::Delete(path), mods, KeyCode::Char('d' | 'D'))
@@ -415,7 +437,9 @@ impl App {
     pub(crate) fn run_key_action(&mut self, action: KeyAction) -> io::Result<()> {
         match action {
             // Global
-            KeyAction::Save => self.save_file()?,
+            KeyAction::Save => {
+                self.save_file()?;
+            }
             KeyAction::CloseTab => {
                 if !self.tabs.is_empty() {
                     if self.is_dirty() {
