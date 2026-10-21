@@ -1,6 +1,6 @@
 # Plan: Jupyter notebook (`.ipynb`) editing
 
-Status: revised after Codex plan review and confirmation round (rev 3) · Branch: `feat/jupyter-notebooks` ·
+Status: revised after Codex plan review and confirmation round (rev 4: notebook commands + run) · Branch: `feat/jupyter-notebooks` ·
 Issue: [#51](https://github.com/TysonLabs/lazyide/issues/51)
 
 ## Goal
@@ -12,11 +12,15 @@ byte-identical when nothing changed.
 
 ## Non-goals (v1)
 
-- Running cells or talking to a Jupyter kernel. Users run notebooks outside
-  lazyide (`jupyter nbconvert --execute --inplace x.ipynb`, or their agent).
-  The watcher picks up the new outputs (see *External changes*).
-- Rendering outputs or images in the editor. A read-only output viewer is an
-  optional follow-up (Phase 3).
+- Running single cells or keeping a live Jupyter kernel. v1 runs the whole
+  notebook through `nbconvert` (see *Notebook commands*). Running one cell at
+  a time with kernel state would roughly double the work, and lazyide stays
+  minimal.
+- Rendering outputs or images in the editor. v1 shows a one-line output
+  summary for the cursor's cell. A read-only output viewer is an optional
+  follow-up (Phase 3).
+- Python language-server support (completions, errors, go-to-definition).
+  That is a separate feature for all Python files.
 - nbformat v3 and older. These open as raw JSON (see *Fallback*).
 - The `nbformat` crate. It was evaluated and rejected: `serialize_notebook`
   refuses nbformat 4.0–4.4 and v3 (nbformat-3.0.0 `src/lib.rs:166-175`),
@@ -152,8 +156,8 @@ four callers handle it:
 `rebuild` steps:
 1. Parse the buffer into cells with tokens, using the token rules above.
 2. If every original cell is present once, in the original order, with the
-   same type, and with unchanged visible text: write `original_bytes`
-   verbatim, then return. This applies lesson l746: a no-op save never
+   same type, and with unchanged visible text, **and no clear-outputs is
+   pending**: write `original_bytes` verbatim, then return. This applies lesson l746: a no-op save never
    rewrites the file.
 3. Otherwise assemble the file:
    - Each kept cell is its original raw object. If its visible text changed,
@@ -258,6 +262,102 @@ In `check_recovery_for_open_file` (`:628-644`):
 The sidecar is removed with the autosave (`core.rs:646-650`, `editor.rs:438`,
 `:474`).
 
+### Notebook commands (v1)
+
+These commands are deliberately few: just enough to move between cells, see
+whether a cell ran, and run the notebook without leaving lazyide. Each command
+works only on a notebook tab (`tab.notebook.is_some()`); on any other tab it
+shows the status "Not a notebook". All buffer changes go through the
+`TextArea` editing API, so Ctrl+Z undoes them.
+
+| Command | Key (default) | Palette entry | Behaviour |
+|---|---|---|---|
+| Next cell | `alt+down` | Notebook: Next cell | Move the cursor to the first line after the next marker |
+| Previous cell | `alt+up` | Notebook: Previous cell | Move the cursor to the first line after the current cell's marker, or after the previous marker if the cursor is already there |
+| Insert cell below | `alt+c` | Notebook: Insert cell below | Insert `\n# %%\n` after the current cell's last line, and put the cursor in the new cell. The new cell gets a token on save |
+| Toggle cell type | — | Notebook: Toggle markdown/code | Rewrite the current marker (code ↔ markdown) and add or remove the `# ` line prefix. The token rule "type changed = new cell" drops the code outputs |
+| Clear outputs | — | Notebook: Clear all outputs | Set `doc.clear_outputs = true` and mark the tab dirty. On save, every code cell gets `outputs: []` and `execution_count: null`. Status: "Outputs will be cleared on save (reload to cancel)". A buffer undo does not undo it. A pending clear is lost on a crash, which is harmless |
+| Run notebook | — | Notebook: Run all (nbconvert) | See *Run notebook* |
+| Stop run | — | Notebook: Stop run | Kill the running `nbconvert` child process |
+
+Keybinding notes (applying lesson "read the key matcher before picking a
+default"):
+- The three keys are unbound today (`src/keybinds.rs:600-664`). The matcher's
+  exact pass runs before its lenient Shift-ignoring pass, so `shift+alt+down`
+  (DupLineDown) and `alt+down` stay distinct.
+- Add a test that `lookup()` resolves each new default to its action, with no
+  shadowing in either pass.
+- Editor-scope keybinds run before ratatui-textarea input, so check that
+  textarea has no Alt+Up/Down behaviour that users rely on.
+- macOS Terminal.app may not send Alt+arrow without "Use Option as Meta". The
+  palette entries are the fallback, and the README says so.
+- New `KeyAction` variants need their JSON names (`keybinds.json`), the
+  keybind editor labels, the help overlay and `is_global()` (these are
+  editor-scoped).
+
+**Output summary (status bar).** For a notebook tab,
+`center_content` (`src/ui/status_bar.rs:132`) appends the cursor's cell to the
+breadcrumbs:
+```
+analysis.ipynb › cell 4/12 · [7] · text, image/png
+analysis.ipynb › cell 5/12 · [8] · error: KeyError
+analysis.ipynb › cell 6/12 · edited, outputs stale
+analysis.ipynb › cell 7/12 · new
+```
+- The summary per cell (execution count, output types, error `ename`) is
+  computed once when the doc loads and stored with the token table.
+- At render time: scan up from the cursor to its marker, take the token, and
+  look up the summary. An edited cell has visible text that differs from the
+  doc's.
+- A status message still takes priority, as today.
+
+### Run notebook
+
+Palette only. A typo cannot start code execution.
+1. **Refuse when the tab is dirty**: "Save before running". Refuse when a run
+   for this notebook is already active.
+2. Record `start_digest` = the disk digest.
+3. Spawn on a thread (the same pattern as `spawn_git_refresh`,
+   `src/util.rs:437-460`, with an `mpsc` result polled in the event loop):
+   `jupyter nbconvert --to notebook --execute --allow-errors --output <tmp>
+   <path>`. `<tmp>` is `.<name>.lazyide-run.ipynb` in the notebook's directory,
+   so the final rename stays on one filesystem.
+   - The working directory is the notebook's directory.
+   - `--allow-errors` writes outputs, including tracebacks, so the user sees
+     the failing cell.
+   - The kernel comes from the notebook's own kernelspec.
+   - Keep the `Child` handle so *Stop run* can kill it.
+4. Status while running: "Running analysis.ipynb… (Notebook: Stop run to
+   cancel)".
+5. On completion, classify every result (lesson: "no output" and "no changes"
+   are different):
+   - Spawn fails with NotFound: "jupyter not found -- install: pip install
+     nbconvert ipykernel", the same style as the rg message
+     (`src/app/search.rs:80`).
+   - Non-zero exit: show the first line of stderr (for example a missing
+     kernel). Delete `<tmp>`. The notebook stays unchanged.
+   - Exit 0, and the disk digest still equals `start_digest`: rename `<tmp>`
+     over the notebook (atomic on one filesystem). The watcher then sees the
+     new digest, and the existing reload/adopt rules load the outputs:
+     pristine reloads, and dirty with outputs-only changes adopts silently.
+     Status: "Run finished in 12s" or "Run finished: cell 5 raised KeyError",
+     read from the reloaded doc's outputs, never from the exit code alone.
+   - Exit 0, but the disk changed during the run (a save in lazyide or another
+     editor): do **not** overwrite. Keep the result as
+     `<name>.executed.ipynb` and show the status "Notebook changed during run;
+     results saved to analysis.executed.ipynb". This covers the race where
+     `--inplace` would have written the pre-run source over the user's
+     edits.
+   - Stopped by the user: delete `<tmp>`. Status: "Run stopped".
+6. The remaining race: an external write between the digest check and the
+   rename. The window is milliseconds and needs another writer at that exact
+   moment, so it is accepted and noted here.
+7. If the tab is closed during the run, the result is still applied to disk
+   and reported in the status.
+8. lazyide asks no confirmation before running: the user runs their own
+   notebook with an explicit palette command, which is the same trust as
+   typing `jupyter nbconvert` in a terminal.
+
 ### Other touchpoints
 
 | # | Site | Change |
@@ -343,6 +443,30 @@ App-level tests (`tempdir` + `App::new` + `open_file`):
 18. A notebook with a Rust kernel highlights as Rust and comment-toggles with
     `//` (F11).
 
+Notebook commands (App-level):
+19. Next and previous cell move between markers. Insert cell below adds a
+    marker, and Ctrl+Z removes it. Toggle type rewrites the prefixes, and a
+    save drops that cell's outputs.
+20. Clear outputs, then save: every code cell has `outputs: []` and
+    `execution_count: null`, and markdown cells are byte-identical. Clear
+    then reload: nothing cleared.
+21. Status summary for an executed cell, an error cell, an edited cell and a
+    new cell.
+22. Default keybinds: `lookup()` resolves `alt+down`, `alt+up` and `alt+c`
+    to the new actions, and `shift+alt+down` still resolves to DupLineDown.
+23. Run notebook: run the spawn-and-classify logic through a command-builder
+    seam so tests can substitute a fake script for `jupyter` (tests must not
+    need Jupyter installed). Cases:
+    - success, then the outputs reload;
+    - a non-zero exit leaves the notebook unchanged;
+    - NotFound gives the install message;
+    - a disk change during the run produces `.executed.ipynb` and leaves the
+      original untouched;
+    - Stop kills the process and removes the temp file;
+    - a dirty tab is refused.
+24. A manual check with real Jupyter (`pip install nbconvert ipykernel`) on a
+    notebook with a plot and a raised error. Record it in the PR.
+
 Each test must fail without its change. Run tests 10–17 once against the
 unmodified code (or with the fix commented out) and record that in the PR.
 
@@ -358,7 +482,15 @@ Gate (the same as CI): `cargo fmt --all -- --check`,
     the `nbconvert` tip, and outputs refreshing on disk change;
   - the Git section note: no gutter for notebooks, and the diff view shows
     JSON;
-  - the project-search note: notebooks are searched by cell text.
+  - the project-search note: notebooks are searched by cell text;
+  - the notebook commands and keys (with the Alt/Option note for macOS
+    Terminal);
+  - the status-bar summary;
+  - Run notebook: it needs `jupyter nbconvert` and `ipykernel`, runs the whole
+    notebook, uses `--allow-errors`, writes `.executed.ipynb` if the notebook
+    changed during the run, and does not run single cells;
+  - Clear outputs.
+- Help overlay and keybind editor: the three new actions.
 - `docs/ARCHITECTURE.md`: the module list (`notebook.rs`), Syntax Highlighting
   (the tab-stored language), Git Integration, and the test count.
 - `CONTRIBUTING.md:130-136`: a note that `.ipynb` is not a language entry.
@@ -373,9 +505,12 @@ Gate (the same as CI): `cargo fmt --all -- --check`,
 |---|---|---|
 | 1 | `notebook.rs`: projection, tokens, validation, raw-value writer and unit tests with fixtures | 3–4 days |
 | 2 | App wiring (save outcome and prompt, watcher and conflict, recovery digest, language on tab, search, rename, gutter, folds, render), App-level tests, docs | 3–4 days |
+| 2b | Notebook commands: cell navigation and insert, toggle type, clear outputs, status summary, Run notebook / Stop run, tests, docs | 2–3 days |
 | 3 (optional, separate PR) | Read-only output viewer for the cursor's cell; a projected git gutter via `git show HEAD:path` | 2–3 days |
 
-Phases 1 and 2 ship as one PR (about 2–2.5K lines, mostly tests and fixtures).
+Phases 1, 2 and 2b ship as one PR (about 2.5–3K lines, mostly tests and
+fixtures), 8–11 days. If the PR is too large to review, split 2b into a
+second PR on top of the first.
 Phase 3 needs a new keybinding: read the key matcher in `src/keybinds.rs`
 before choosing the default.
 
