@@ -66,6 +66,11 @@ pub(crate) enum CommandAction {
     MoveTabToOtherPane,
     ClosePane,
     ToggleMinimap,
+    NotebookNextCell,
+    NotebookPrevCell,
+    NotebookInsertCellBelow,
+    NotebookToggleCellType,
+    NotebookClearOutputs,
 }
 
 #[derive(Debug, Clone)]

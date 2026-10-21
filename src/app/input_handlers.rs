@@ -420,7 +420,11 @@ impl App {
         }
 
         if let Some(action) = self.keybinds.lookup(&key, KeyScope::Editor) {
-            return self.run_key_action(action);
+            // Notebook-only keys fall through to the editor on other tabs.
+            let notebook_tab = self.active_tab().is_some_and(|t| t.is_notebook());
+            if notebook_tab || !action.is_notebook_only() {
+                return self.run_key_action(action);
+            }
         }
 
         let modified = self
@@ -632,6 +636,9 @@ impl App {
                 self.sync_editor_scroll_guess();
                 self.set_status("End of file");
             }
+            KeyAction::NextCell => self.notebook_next_cell(),
+            KeyAction::PrevCell => self.notebook_prev_cell(),
+            KeyAction::InsertCellBelow => self.notebook_insert_cell_below(),
         }
         Ok(())
     }

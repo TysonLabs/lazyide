@@ -75,6 +75,11 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::MoveTabToOtherPane => "Move Tab to Other Pane",
         CommandAction::ClosePane => "Close Pane",
         CommandAction::ToggleMinimap => "Toggle Minimap",
+        CommandAction::NotebookNextCell => "Notebook: Next cell",
+        CommandAction::NotebookPrevCell => "Notebook: Previous cell",
+        CommandAction::NotebookInsertCellBelow => "Notebook: Insert cell below",
+        CommandAction::NotebookToggleCellType => "Notebook: Toggle markdown/code",
+        CommandAction::NotebookClearOutputs => "Notebook: Clear all outputs",
     }
 }
 

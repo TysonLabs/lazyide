@@ -520,6 +520,11 @@ impl App {
             CommandAction::MoveTabToOtherPane,
             CommandAction::ClosePane,
             CommandAction::ToggleMinimap,
+            CommandAction::NotebookNextCell,
+            CommandAction::NotebookPrevCell,
+            CommandAction::NotebookInsertCellBelow,
+            CommandAction::NotebookToggleCellType,
+            CommandAction::NotebookClearOutputs,
         ];
         // Every whitespace-separated word must appear in the label, so
         // "split vert" finds "Split Editor Vertically".
@@ -600,6 +605,11 @@ impl App {
             CommandAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
             CommandAction::ClosePane => self.close_pane(),
             CommandAction::ToggleMinimap => self.toggle_minimap(),
+            CommandAction::NotebookNextCell => self.notebook_next_cell(),
+            CommandAction::NotebookPrevCell => self.notebook_prev_cell(),
+            CommandAction::NotebookInsertCellBelow => self.notebook_insert_cell_below(),
+            CommandAction::NotebookToggleCellType => self.notebook_toggle_cell_type(),
+            CommandAction::NotebookClearOutputs => self.notebook_clear_outputs(),
         }
         Ok(())
     }

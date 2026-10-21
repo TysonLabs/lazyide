@@ -32,6 +32,7 @@ The app is now modular (library + thin binary launcher):
   - `search.rs` (find/replace/project search)
   - `git_diff.rs` (diff view keys, next/previous change jumps)
   - `panes.rs` (two-pane split: focus swap, split/close/move tab, layout, divider drag)
+  - `notebook_cmds.rs` (notebook commands: cell navigation/insert, toggle code/markdown, clear outputs)
   - `lsp.rs` (LSP lifecycle, diagnostics, completion, definition handling)
 - `src/ui/mod.rs` + `src/ui/overlays.rs` + `src/ui/helpers.rs` — drawing and overlays
 - Shared domain/util modules:

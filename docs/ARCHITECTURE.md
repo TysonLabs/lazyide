@@ -19,9 +19,10 @@ src/
     search.rs          Find/replace in file, project search (ripgrep)
     git_diff.rs        Diff view open/scroll/hunk keys, next/previous change jumps
     panes.rs           Two-pane split: swap-based focus, split/close/move, layout, divider drag
+    notebook_cmds.rs   Notebook commands: next/previous cell, insert cell, toggle code/markdown, clear outputs
   ui/
     mod.rs             Main draw() function (layout, tree pane, tab row, editor pane)
-    status_bar.rs      Structured status bar (mode, branch, breadcrumbs, cursor, diagnostics)
+    status_bar.rs      Structured status bar (mode, branch, breadcrumbs + notebook cell summary, cursor, diagnostics)
     overlays.rs        Overlays: command palette, theme browser, help, prompts, etc.
     helpers.rs         UI utilities (centered_rect, label helpers, indent guides, horizontal span clipping)
   keybinds.rs          KeyAction enum, KeyBind, KeyBindings, JSON load/save
@@ -73,6 +74,8 @@ lib.rs: run_app()
 3. **Global keybinds** — `keybinds.lookup(key, Global)` -> `run_key_action()`
 4. **Non-remappable keys** (Esc, Tab for focus switch, Delete in tree)
 5. **Focus-specific** — `Focus::Tree` -> `handle_tree_key()`, `Focus::Editor` -> `handle_editor_key()`
+
+The notebook keys (`KeyAction::is_notebook_only()`: next/previous cell, insert cell) run only on a notebook tab. On any other tab `handle_editor_key()` skips them and the key goes on to the textarea, as if unbound. They are last in `KeyAction::all()`, so a user binding on the same key wins the lookup.
 
 Every pending action has key handling in `handle_pending_key()` (`app/input_handlers.rs`) and a status hint in `util::pending_hint`. The modal ones (close prompt, delete, notebook reformat) also have a dialog in `ui/overlays.rs` and are mouse modals in `handle_mouse()` (a click outside cancels them). Quit is status-only: no dialog and no mouse modal.
 
