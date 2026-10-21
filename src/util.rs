@@ -77,6 +77,8 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::ToggleMinimap => "Toggle Minimap",
         CommandAction::ReopenAsRawJson => "Reopen as raw JSON",
         CommandAction::ReopenAsNotebook => "Reopen as notebook",
+        CommandAction::NotebookRunAll => "Notebook: Run all (nbconvert)",
+        CommandAction::NotebookStopRun => "Notebook: Stop run",
     }
 }
 

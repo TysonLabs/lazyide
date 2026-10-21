@@ -70,7 +70,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Syntax highlighting** — Rust, Python, JS/TS, Go, PHP, CSS/SCSS, HTML/XML, Shell, JSON/TOML/YAML, Markdown
 - **Code folding** — brace-based (Rust, JS, Go), indentation-based (Python), tag-based (HTML/XML)
 - **Bracket pair colorization** — `{}` `()` `[]` colored by nesting depth
-- **Find & replace** — regex search in file, ripgrep-powered project search
+- **Find & replace** — regex search in file, ripgrep-powered project search. Jupyter notebooks (`.ipynb`) are searched by their cell text, so a hit jumps to the matching line of the cell view; outputs and metadata are not searched. A notebook that cannot be shown as cells is searched as raw JSON. At most 500 notebooks are searched per query; the status bar says how many were skipped. If ripgrep reports an error (for example an invalid regex), the status bar shows it
 - **Word wrap** — toggle with `Alt+Z`, with full cursor/selection/mouse support
 - **Horizontal scrolling** — `Shift+scroll` when word wrap is off
 
@@ -115,6 +115,14 @@ import pandas as pd
 - **Changes on disk** — changes are checked by the watcher and again immediately before a notebook save, so a save cannot race ahead of watcher debounce. A tab without unsaved edits reloads. With unsaved edits, a change of outputs, metadata or execution counts only is adopted silently ("Notebook outputs updated on disk") and the next save keeps both. Any other change asks: `R` loads the disk version, `K`/`D`/`Esc` keep your version, and the next save overwrites the notebook on disk.
 - **Autosave & recovery** — recovery re-attaches cell outputs only if the notebook file is unchanged since the autosave; otherwise the text is recovered as new cells, and the prompt says outputs will not be re-attached.
 - **Reopen as raw JSON** — the palette commands "Reopen as raw JSON" and "Reopen as notebook" switch the current tab between the cell view and the plain JSON text (to edit metadata by hand). Save first; a tab with unsaved changes is not reopened.
+
+#### Run notebook
+
+- **Notebook: Run all (nbconvert)** (command palette only) runs the whole notebook in the current tab with `jupyter nbconvert --to notebook --execute --allow-errors`, in the notebook's directory, with the notebook's own kernel. It needs `jupyter nbconvert` and `ipykernel` (`pip install nbconvert ipykernel`). There is no single-cell run and no live kernel.
+- Save first: a tab with unsaved changes is refused ("Save before running"). One run per notebook at a time; the status bar shows "Running x.ipynb…" while it runs.
+- `--allow-errors` keeps going after a failing cell and writes its traceback, so the status reports the first failing cell ("Run finished: cell 5 raised KeyError") or "Run finished in 12s". A run that fails to start (for example a missing kernel) shows the error and leaves the notebook unchanged.
+- The result replaces the notebook on disk, and the open tab picks up the new outputs. If the notebook changed on disk during the run, it is not overwritten: the result is saved as `x.executed.ipynb` next to it.
+- **Notebook: Stop run** kills the run and discards its partial result. A run continues if its tab is closed, and its result is still applied and reported. Quitting lazyide stops active runs.
 
 ## Keyboard
 
@@ -228,6 +236,7 @@ Requires Rust 2024 edition.
 | [rust-analyzer](https://rust-analyzer.github.io/manual.html#installation) | LSP completions, diagnostics, go-to-definition | `lazyide --setup` |
 | [ripgrep](https://github.com/BurntSushi/ripgrep#installation) | Project-wide search | `lazyide --setup` |
 | git | Branch display, gutter markers | System package manager |
+| jupyter nbconvert + ipykernel | Run notebook | `pip install nbconvert ipykernel` |
 
 ## Documentation
 

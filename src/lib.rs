@@ -121,6 +121,7 @@ fn run_app(mut terminal: Terminal<CrosstermBackend<Stdout>>, mut app: App) -> io
     loop {
         app.poll_lsp();
         app.poll_git_results();
+        app.poll_notebook_runs();
         app.poll_wrap_rebuild();
         if let Err(err) = app.poll_fs_changes() {
             app.set_status(format!("Filesystem update error: {err}"));

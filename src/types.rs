@@ -66,6 +66,8 @@ pub(crate) enum CommandAction {
     ToggleMinimap,
     ReopenAsRawJson,
     ReopenAsNotebook,
+    NotebookRunAll,
+    NotebookStopRun,
 }
 
 #[derive(Debug, Clone)]

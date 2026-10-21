@@ -552,6 +552,7 @@ impl App {
                 }
                 fs::rename(&target, &renamed)?;
                 self.retarget_tabs_for_rename(&target, &renamed);
+                self.retarget_notebook_runs(&target, &renamed);
                 self.retarget_expanded_for_rename(&target, &renamed);
                 for (old_path, _) in reopen {
                     let new_path = match old_path.strip_prefix(&target) {
@@ -596,6 +597,7 @@ impl App {
                     return Ok(());
                 }
                 self.retarget_tabs_for_rename(&target, &moved);
+                self.retarget_notebook_runs(&target, &moved);
                 self.retarget_expanded_for_rename(&target, &moved);
                 // Reveal the destination: expand every ancestor inside the project.
                 for dir in dest_dir.ancestors() {

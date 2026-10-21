@@ -166,6 +166,8 @@ impl App {
             git_refresh_in_flight: false,
             git_thread_handle: None,
             cached_file_list: Vec::new(),
+            notebook_runs: Vec::new(),
+            jupyter_cmd: vec!["jupyter".to_string()],
         };
         app.git_branch = detect_git_branch(&app.root);
         app.git_file_statuses = compute_git_file_statuses(&app.root);
@@ -527,6 +529,8 @@ impl App {
             CommandAction::ToggleMinimap,
             CommandAction::ReopenAsRawJson,
             CommandAction::ReopenAsNotebook,
+            CommandAction::NotebookRunAll,
+            CommandAction::NotebookStopRun,
         ];
         // Every whitespace-separated word must appear in the label, so
         // "split vert" finds "Split Editor Vertically".
@@ -609,6 +613,8 @@ impl App {
             CommandAction::ToggleMinimap => self.toggle_minimap(),
             CommandAction::ReopenAsRawJson => self.reopen_active_tab(false)?,
             CommandAction::ReopenAsNotebook => self.reopen_active_tab(true)?,
+            CommandAction::NotebookRunAll => self.run_notebook(),
+            CommandAction::NotebookStopRun => self.stop_notebook_run(),
         }
         Ok(())
     }
