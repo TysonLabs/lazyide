@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use url::Url;
 
 use crate::lsp_client::{LspClient, LspCompletionItem, LspDiagnostic, LspInbound};
-use crate::syntax::{is_ident_char, keywords_for_lang, syntax_lang_for_path};
+use crate::syntax::{is_ident_char, keywords_for_lang};
 use crate::util::{file_uri, to_u16_saturating};
 
 impl App {
@@ -431,7 +431,7 @@ impl App {
         let prefix = self.current_identifier_prefix();
         let mut seen = std::collections::BTreeSet::new();
         let mut out = Vec::new();
-        for kw in keywords_for_lang(syntax_lang_for_path(self.open_path().map(|p| p.as_path()))) {
+        for kw in keywords_for_lang(self.active_syntax_lang()) {
             if (prefix.is_empty() || kw.starts_with(&prefix))
                 && kw != &prefix
                 && seen.insert((*kw).to_string())

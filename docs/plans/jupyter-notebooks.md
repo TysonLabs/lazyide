@@ -382,6 +382,48 @@ Blast-radius notes:
 - `syntax_lang_for_path` callers are all listed above.
 - `save_file` callers are all listed above.
 
+## Regression guardrails (non-notebook users)
+
+The feature must not change anything for a user who never opens a
+`.ipynb`. Every slice follows these rules, and each merge into the feature
+branch is checked against them.
+
+1. **Gate on the tab, not the path.** Every notebook branch checks
+   `tab.notebook.is_some()`. Raw-text code paths keep their current behaviour
+   byte-for-byte.
+2. **Existing tests stay untouched.** The ~301 tests from before this feature
+   must pass without edits to their assertions. The only allowed change is
+   adding new struct fields to `Tab` literals. The merge check diffs the
+   existing test modules for removed or changed assertions.
+3. **Keys fall through on raw tabs.** `alt+down`, `alt+up` and `alt+c` act
+   only on notebook tabs. On any other tab the key falls through to
+   today's handling: no status message, and the key is not consumed. Today
+   ratatui-textarea does nothing with these keys (its Up/Down arms require
+   `alt: false`). The palette entries still show "Not a notebook".
+4. **User keybinds win.** `KeyBindings::lookup` returns the first action in
+   `KeyAction::all()` order (`src/keybinds.rs:672-697`). The new actions are
+   **appended at the end** of `KeyAction::all()`, so a user's
+   `keybinds.json` binding on the same key keeps working. Test: a user
+   override that binds `alt+c` to an existing action still resolves to that
+   action.
+5. **Search without notebooks is unchanged.** If `rg --files --glob '*.ipynb'`
+   finds no notebooks, project search runs exactly today's rg command (same
+   args, one process, same result order). Test the argument list. With
+   notebooks present, the extra cost is one `rg --files` pass plus one rg
+   process per notebook, capped at 500.
+6. **Hot paths stay cheap.** `Tab::syntax_lang()` replaces a path lookup with
+   a field check plus the same lookup, so per-frame render and fold cost are
+   unchanged. The marker styling and status summary run only for notebook
+   tabs.
+7. **Escape hatch for notebook users.** A palette command "Reopen as raw
+   JSON" reopens the current notebook tab as plain text, the same as today's
+   behaviour, so metadata can still be edited by hand.
+   "Reopen as notebook" goes back.
+8. **Manual smoke test before the PR to `main`.** Open, edit, save, search,
+   rename and split-pane on a Rust project and on a plain-text file, with
+   autosave/recovery and an external-change conflict. Record the results in
+   the PR.
+
 ## Testing
 
 All tests are inline `#[cfg(test)]` modules, per CONTRIBUTING.md.

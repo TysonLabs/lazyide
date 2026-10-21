@@ -69,10 +69,16 @@ lib.rs: run_app()
 `handle_key()` in `app/input.rs` routes events top-to-bottom by priority:
 
 1. **Modal overlays** (keybind editor, file picker, prompts, completion, search results, context menus, theme browser, command palette, help) — first open modal wins
-2. **Pending actions** (quit confirmation, delete confirmation)
+2. **Pending actions** (`PendingAction`: quit confirmation, close prompt, delete confirmation, notebook reformat prompt)
 3. **Global keybinds** — `keybinds.lookup(key, Global)` -> `run_key_action()`
 4. **Non-remappable keys** (Esc, Tab for focus switch, Delete in tree)
 5. **Focus-specific** — `Focus::Tree` -> `handle_tree_key()`, `Focus::Editor` -> `handle_editor_key()`
+
+Every pending action has key handling in `handle_pending_key()` (`app/input_handlers.rs`) and a status hint in `util::pending_hint`. The modal ones (close prompt, delete, notebook reformat) also have a dialog in `ui/overlays.rs` and are mouse modals in `handle_mouse()` (a click outside cancels them). Quit is status-only: no dialog and no mouse modal.
+
+**Save flow.** `save_file()` returns `SaveOutcome`: `Saved` (the buffer is on disk), `Deferred` (nothing written yet; a prompt asks first) or `Failed` (nothing written, including "No file open"; the status says why). I/O errors stay `Err`. The Save key and the palette Save only save. The close prompt (Enter / Ctrl+S) goes through `save_and_close_file()`, which closes the tab only on `Saved`; on `Deferred` it sets `then_close` on the pending `NotebookReformat` prompt. That prompt asks before a save changes a notebook's JSON whitespace: `y` sets the tab's `reformat_confirmed` (kept for the tab's lifetime), saves, and closes only if `then_close` and the save returned `Saved`; `n` / Esc leaves the tab open and dirty.
+
+**Rename and notebook mode.** A tab's notebook mode (`tab.notebook.is_some()`) is decided when the file opens. Before a tree rename touches disk, `tabs_changing_notebook_mode()` finds open tabs (both panes) at or under the target whose mode the new name would change (to or from an `.ipynb` extension, case-insensitive; `.ipynb` to `.ipynb` keeps the mode). If any is dirty, the rename is refused with "Save <name> before renaming". After the rename, the affected clean tabs are closed and reopened in the same pane and slot, keeping the active tab and focus. Move keeps the file name, so it never changes the mode.
 
 Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling through to `tui_textarea::Input` for basic text editing (arrow keys, typing characters, etc.).
 
@@ -142,6 +148,8 @@ Each theme defines: background, foreground, accent, selection, border colors + s
 
 Lightweight, line-at-a-time highlighting in `highlight_line()`. No AST — just keyword matching, string/comment detection, and bracket depth tracking. Supports 11 language families detected by file extension.
 
+The language is a property of the tab: `Tab::syntax_lang()` returns the notebook's kernel language for a notebook tab (`tab.notebook.is_some()`) and `syntax_lang_for_path()` otherwise. Highlighting, folds, keyword completion and toggle comment (`Tab::comment_prefix()`) all read it, and `open_file_as` uses the same `tab_syntax_lang()` helper before the tab exists. On notebook tabs, `compute_tab_fold_ranges()` adds one fold per cell (`compute_cell_fold_ranges()`: marker line to the line before the next marker), and cell marker lines draw in the accent colour, bold. A `.ipynb` opened as raw JSON is a normal text tab.
+
 Bracket colorization uses a depth counter computed per-file in `compute_fold_ranges()`, cycling through 3 theme-defined colors.
 
 ## File Tree
@@ -154,9 +162,9 @@ Git status is computed by shelling out to `git` (no libgit2 dependency):
 
 - **Branch**: `git rev-parse --abbrev-ref HEAD` → top bar display
 - **File statuses**: `git status --porcelain -z` → NUL-separated parsing for safe handling of paths with spaces/special characters. Statuses propagate up to parent directories (Modified > Added > Untracked priority, matching VS Code behavior).
-- **Line statuses**: `git diff HEAD -- <file>` → unified diff hunk parsing. Falls back to `git status --porcelain` for untracked files (all lines marked Added). Stored per-tab in `Tab.git_line_status`.
+- **Line statuses**: `git diff HEAD -- <file>` → unified diff hunk parsing. Falls back to `git status --porcelain` for untracked files (all lines marked Added). Stored per-tab in `Tab.git_line_status`. Notebook tabs get an all-`None` gutter (the diff is of the raw JSON, not the projected cell text); a `.ipynb` opened as raw JSON keeps the normal gutter.
 - **Change summary**: `GitChangeSummary` counts (modified/added/untracked) shown in top bar as `Δ: ~M +A ?U`.
-- **Diff view**: `diff::git_diff_for_file` runs `git diff HEAD -- <file>` (untracked files become all-added) and `parse_unified_diff` pairs removed/added runs into `DiffRow`s; `ui/overlays.rs::render_diff_view` draws them side by side with hunk headers. `app/git_diff.rs` owns the keys (n/p hunks, Enter jumps) and `Alt+N`/`Alt+P` change jumps via `diff::next_change_row` over the gutter statuses.
+- **Diff view**: `diff::git_diff_for_file` runs `git diff HEAD -- <file>` (untracked files become all-added) and `parse_unified_diff` pairs removed/added runs into `DiffRow`s; `ui/overlays.rs::render_diff_view` draws them side by side with hunk headers. `app/git_diff.rs` owns the keys (n/p hunks, Enter jumps; on a notebook tab Enter shows a status instead of jumping) and `Alt+N`/`Alt+P` change jumps via `diff::next_change_row` over the gutter statuses.
 - **Refresh triggers**: file open, file save, and FS change events. FS refresh uses path-aware event coalescing — only affected tabs recompute line status, with full fallback for `.git/` changes or ambiguous events.
 
 ## Testing
@@ -169,7 +177,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-330 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, notebook projection and save, and utilities. Notebook fixtures in `src/notebook/testdata/` are generated by real Jupyter writers (see its README).
+Tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, notebook projection and save, and utilities. Notebook fixtures in `src/notebook/testdata/` are generated by real Jupyter writers (see its README).
 
 ## Adding a New Feature
 
