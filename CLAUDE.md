@@ -37,6 +37,7 @@ The app is now modular (library + thin binary launcher):
 - Shared domain/util modules:
   - `src/types.rs`, `src/tab.rs`, `src/tree_item.rs`
   - `src/theme.rs`, `src/syntax.rs`, `src/persistence.rs`, `src/lsp_client.rs`, `src/keybinds.rs`, `src/diff.rs`, `src/minimap.rs`, `src/util.rs`
+  - `src/notebook.rs` — pure Jupyter `.ipynb` projection: notebook JSON <-> percent-format cell text with identity tokens; saves splice only changed cells into the original JSON (raw values, never re-serialized). Design: `docs/plans/jupyter-notebooks.md`
 
 Core model remains the same:
 
