@@ -338,9 +338,14 @@ fn field<'a>(fields: &'a Fields, key: &str) -> Option<&'a RawValue> {
     fields.iter().find(|(k, _)| k == key).map(|(_, v)| &**v)
 }
 
+/// The value for reading (summaries, language). A RawValue is valid JSON,
+/// but a number beyond f64 range fails to parse; that reads as Null.
 fn value_of(raw: &RawValue) -> Value {
-    // A RawValue is already valid JSON.
     serde_json::from_str(raw.get()).unwrap_or(Value::Null)
+}
+
+fn is_object(raw: &RawValue) -> bool {
+    raw.get().starts_with('{')
 }
 
 /// Parse notebook bytes into a doc, or say why it must open as raw JSON.
@@ -358,8 +363,10 @@ pub(crate) fn project(text: &str) -> Result<NotebookDoc, NotebookOpenError> {
         .map(value_of)
         .and_then(|v| v.as_u64())
         .ok_or_else(|| invalid("nbformat_minor is not an integer"))?;
-    let metadata = field(&root, "metadata").map(value_of);
-    let Some(metadata @ Value::Object(_)) = metadata else {
+    // Shape checks read the raw bytes: a `Value` parse can fail on numbers
+    // Python writes (an integer like 10**400), which must not block opening.
+    let metadata = field(&root, "metadata").filter(|m| is_object(m));
+    let Some(metadata) = metadata.map(value_of) else {
         return Err(invalid("metadata is not an object"));
     };
     let cells_raw = field(&root, "cells").ok_or_else(|| invalid("cells is missing"))?;
@@ -418,10 +425,7 @@ fn parse_cell(raw: &RawValue, i: usize, nbformat_minor: u64) -> Result<Cell, Not
         }
         _ => return Err(invalid(format!("cell {n}: source is not a string or list"))),
     };
-    if !matches!(
-        field(&fields, "metadata").map(value_of),
-        Some(Value::Object(_))
-    ) {
+    if !matches!(field(&fields, "metadata").map(is_object), Some(true)) {
         return Err(invalid(format!("cell {n}: metadata is not an object")));
     }
     let id = match field(&fields, "id").map(value_of) {
@@ -444,15 +448,16 @@ fn parse_cell(raw: &RawValue, i: usize, nbformat_minor: u64) -> Result<Cell, Not
     }
     cell.text = cell.lines.join("\n");
     if kind == CellKind::Code {
-        let Some(Value::Array(outputs)) = field(&fields, "outputs").map(value_of) else {
-            return Err(invalid(format!("cell {n}: outputs is not an array")));
-        };
+        let outputs = field(&fields, "outputs")
+            .and_then(|o| serde_json::from_str::<Vec<Box<RawValue>>>(o.get()).ok())
+            .ok_or_else(|| invalid(format!("cell {n}: outputs is not an array")))?;
         cell.execution_count = match field(&fields, "execution_count").map(value_of) {
             Some(Value::Null) => None,
             Some(Value::Number(c)) if c.is_i64() || c.is_u64() => c.as_i64(),
             _ => return Err(invalid(format!("cell {n}: bad execution_count"))),
         };
-        for out in &outputs {
+        for out in outputs.iter().map(|o| value_of(o)) {
+            let out = &out;
             cell.output_kinds.push(output_kind(out));
             if cell.error.is_none()
                 && out.get("output_type").and_then(Value::as_str) == Some("error")
@@ -1155,6 +1160,25 @@ mod tests {
             );
             assert_eq!(r.bytes.matches("1180591620717411303424").count(), 2);
         }
+    }
+
+    #[test]
+    fn arbitrary_precision_numbers_do_not_block_projection_or_change_on_save() {
+        let huge = "1".to_string() + &"0".repeat(400);
+        let text = format!(
+            "{{\n \"cells\": [\n  {{\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"metadata\": {{\"huge\": {huge}}},\n   \"outputs\": [{{\"data\": {{\"application/json\": {huge}}}, \"metadata\": {{}}, \"output_type\": \"display_data\"}}],\n   \"source\": [\n    \"x = 1\"\n   ]\n  }}\n ],\n \"metadata\": {{\"huge\": {huge}}},\n \"nbformat\": 4,\n \"nbformat_minor\": 4\n}}\n"
+        );
+        let d = doc(&text);
+        let edited = d.projected_text().replacen("x = 1", "x = 2", 1);
+        let r = rebuild(&d, &edited).unwrap();
+        assert!(r.bytes.contains(&format!("\"huge\": {huge}")));
+        assert_eq!(r.bytes.matches(&huge).count(), 3);
+        // The summary is best-effort: an output with an f64-overflowing number
+        // reads as unknown, but the notebook still opens.
+        assert_eq!(
+            d.cell_summary(&d.tokens()[0]).unwrap().output_kinds,
+            vec!["unknown"]
+        );
     }
 
     #[test]
