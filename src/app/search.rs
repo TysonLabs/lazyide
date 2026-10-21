@@ -197,6 +197,7 @@ fn rg_list_notebooks_args(root: &Path) -> Vec<OsString> {
 /// Searches projected notebook text piped on stdin; output is `line:text`.
 fn rg_stdin_args(query: &str) -> Vec<OsString> {
     [
+        "--text",
         "--line-number",
         "--no-heading",
         "--color",
@@ -209,6 +210,21 @@ fn rg_stdin_args(query: &str) -> Vec<OsString> {
     .iter()
     .map(OsString::from)
     .collect()
+}
+
+/// Blanks generated notebook marker lines while preserving every projected
+/// line number. Markers and their identity tokens are editor scaffolding, not
+/// cell text, so they must not produce project-search hits.
+fn notebook_search_text(projected: &str) -> String {
+    let mut searchable = String::with_capacity(projected.len());
+    for line in projected.split_inclusive('\n') {
+        if line.starts_with("# %%") {
+            searchable.push('\n');
+        } else {
+            searchable.push_str(line);
+        }
+    }
+    searchable
 }
 
 /// Runs rg, feeding `stdin` from a separate thread so a large input cannot
@@ -311,8 +327,9 @@ fn run_project_search_capped(root: &Path, query: &str, cap: usize) -> io::Result
             failed.push(path);
             continue;
         };
+        let searchable = notebook_search_text(doc.projected_text());
         let errors_before = search.errors.len();
-        let Some(stdout) = search.run(&stdin_args, Some(doc.projected_text())) else {
+        let Some(stdout) = search.run(&stdin_args, Some(&searchable)) else {
             break;
         };
         if search.errors.len() > errors_before {
@@ -472,6 +489,39 @@ mod tests {
         assert!(app.search_results.results.is_empty());
         app.search_in_project("needle_meta");
         assert!(app.search_results.results.is_empty());
+    }
+
+    #[test]
+    fn notebook_search_does_not_match_generated_cell_markers() {
+        if !have_rg() {
+            return;
+        }
+        let tmp = tempdir().expect("tempdir");
+        fs::write(tmp.path().join("a.ipynb"), notebook_json()).expect("write");
+
+        let search = run_project_search(tmp.path(), "markdown").expect("rg");
+
+        assert!(
+            search.hits.is_empty(),
+            "generated marker matched: {:?}",
+            search.hits
+        );
+    }
+
+    #[test]
+    fn notebook_search_treats_nul_in_cell_source_as_text() {
+        if !have_rg() {
+            return;
+        }
+        let tmp = tempdir().expect("tempdir");
+        let nb = tmp.path().join("a.ipynb");
+        let json = notebook_json().replace("the needle_cell line", "before\\u0000needle_nul");
+        fs::write(&nb, json).expect("write");
+
+        let search = run_project_search(tmp.path(), "needle_nul").expect("rg");
+
+        assert_eq!(search.hits.len(), 1, "{:?}", search.hits);
+        assert_eq!(search.hits[0].path, nb);
     }
 
     #[test]
