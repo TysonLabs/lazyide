@@ -399,6 +399,7 @@ impl App {
             self.active_tab = idx;
             self.completion.reset();
             self.focus = Focus::Editor;
+            self.reconcile_activated_notebook();
         }
     }
 
@@ -666,7 +667,7 @@ impl App {
             return Ok(());
         }
         for tab in self.all_tabs() {
-            if !tab.dirty {
+            if !tab.dirty || tab.keep_autosave {
                 continue;
             }
             let autosave = autosave_path_for(&tab.path);
@@ -676,6 +677,10 @@ impl App {
             fs::write(&autosave, tab.editor.lines().join("\n"))?;
             if let Some(doc) = &tab.notebook {
                 write_nbtokens_sidecar(&tab.path, doc)?;
+            } else if is_ipynb_path(&tab.path) {
+                // A raw-JSON autosave replaced any projected one: drop its
+                // sidecar so recovery sees the raw view.
+                let _ = fs::remove_file(nbtokens_path_for(&tab.path));
             }
         }
         self.autosave_last_write = Instant::now();
@@ -691,7 +696,19 @@ impl App {
         let Ok(mut recovered) = fs::read_to_string(autosave) else {
             return;
         };
-        if self.tabs[self.active_tab].is_notebook() {
+        // A notebook tab autosaves projected cell text plus a `.nbtokens`
+        // sidecar; a raw tab autosaves the buffer alone. Offer an autosave only
+        // to a tab in the same view, and keep both files on a mismatch.
+        let notebook_tab = self.tabs[self.active_tab].is_notebook();
+        if nbtokens_path_for(&path).exists() != notebook_tab {
+            self.tabs[self.active_tab].keep_autosave = true;
+            self.set_status(format!(
+                "Autosave for {} was written in a different view; not recovered",
+                relative_path(&self.root, &path).display()
+            ));
+            return;
+        }
+        if notebook_tab {
             recovered = self.recover_notebook_tokens(recovered);
         }
         let current = self.tabs[self.active_tab].editor.lines().join("\n");
@@ -704,7 +721,7 @@ impl App {
     }
 
     pub(crate) fn clear_autosave_for_open_file(&mut self) {
-        if let Some(tab) = self.active_tab() {
+        if let Some(tab) = self.active_tab().filter(|t| !t.keep_autosave) {
             let _ = fs::remove_file(autosave_path_for(&tab.path));
             let _ = fs::remove_file(nbtokens_path_for(&tab.path));
         }

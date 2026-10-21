@@ -409,6 +409,7 @@ impl App {
             notebook,
             reformat_confirmed: false,
             recovery_tokens_stale: false,
+            keep_autosave: false,
         };
 
         // If opening as preview, replace existing preview tab
@@ -430,12 +431,13 @@ impl App {
         self.focus = Focus::Editor;
         self.completion.reset();
         self.ensure_lsp_for_path(&path);
-        self.check_recovery_for_open_file();
         let rel = relative_path(&self.root, &path).display().to_string();
         match raw_reason {
             Some(reason) => self.set_status(format!("Opened {rel} as raw JSON: {reason}")),
             None => self.set_status(format!("Opened {rel}")),
         }
+        // After the open status, so a recovery-mismatch status stays visible.
+        self.check_recovery_for_open_file();
         Ok(())
     }
 
@@ -521,19 +523,24 @@ impl App {
                 }),
             );
         }
-        // Clear autosave
-        let _ = fs::remove_file(autosave_path_for(&self.tabs[idx].path));
-        let _ = fs::remove_file(nbtokens_path_for(&self.tabs[idx].path));
+        // Clear autosave (unless it is a kept other-view autosave)
+        if !self.tabs[idx].keep_autosave {
+            let _ = fs::remove_file(autosave_path_for(&self.tabs[idx].path));
+            let _ = fs::remove_file(nbtokens_path_for(&self.tabs[idx].path));
+        }
         self.tabs.remove(idx);
         if self.tabs.is_empty() {
             self.active_tab = 0;
             self.focus = Focus::Tree;
             self.completion.reset();
             self.set_status("Closed file");
-        } else if self.active_tab >= self.tabs.len() {
-            self.active_tab = self.tabs.len() - 1;
-        } else if self.active_tab > idx {
-            self.active_tab -= 1;
+        } else {
+            if self.active_tab >= self.tabs.len() {
+                self.active_tab = self.tabs.len() - 1;
+            } else if self.active_tab > idx {
+                self.active_tab -= 1;
+            }
+            self.reconcile_activated_notebook();
         }
     }
     pub(crate) fn handle_help_key(&mut self, key: KeyEvent) -> io::Result<()> {

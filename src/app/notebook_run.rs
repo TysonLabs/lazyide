@@ -37,6 +37,20 @@ pub(crate) fn executed_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{}.executed.ipynb", file_stem(path)))
 }
 
+/// The first unused of `<stem>.executed.ipynb`, `<stem>.executed-2.ipynb`,
+/// `-3`, ...: an earlier run's kept result is never overwritten.
+pub(crate) fn unused_executed_path(path: &Path) -> PathBuf {
+    let first = executed_path(path);
+    if !first.exists() {
+        return first;
+    }
+    let stem = file_stem(path);
+    (2..)
+        .map(|n| path.with_file_name(format!("{stem}.executed-{n}.ipynb")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
+}
+
 fn file_stem(path: &Path) -> String {
     path.file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -147,7 +161,11 @@ impl App {
             .position(|r| Some(&r.path) == active.as_ref())
             .or_else(|| (self.notebook_runs.len() == 1).then_some(0));
         let Some(idx) = idx else {
-            self.set_status("No notebook run to stop");
+            if self.notebook_runs.is_empty() {
+                self.set_status("No notebook run to stop");
+            } else {
+                self.set_status("Several notebooks are running; open the one to stop");
+            }
             return;
         };
         let run = &mut self.notebook_runs[idx];
@@ -222,8 +240,8 @@ impl App {
         let disk_digest = fs::read(&run.path).ok().map(|b| digest(&b));
         if disk_digest != Some(run.start_digest) {
             // The notebook changed (or vanished) during the run: never
-            // overwrite it; keep the result next to it.
-            let dest = executed_path(&run.path);
+            // overwrite it, or an earlier kept result; keep it next to it.
+            let dest = unused_executed_path(&run.path);
             let dest_name = relative_path(&self.root, &dest).display().to_string();
             return match fs::rename(&run.tmp, &dest) {
                 Ok(()) => {
@@ -511,6 +529,65 @@ mod tests {
         assert_eq!(app.status, latest_status);
     }
 
+    /// The run finishes while another tab is active and the watcher pass
+    /// reconciles only that tab; activating the notebook tab applies it.
+    fn assert_notebook_tab_took_run_result(app: &App, before: &str) {
+        let tab = app.active_tab().unwrap();
+        assert!(tab.is_notebook());
+        assert!(!tab.dirty);
+        assert_eq!(tab.editor.lines().join("\n"), before);
+        let doc = tab.notebook.as_ref().unwrap();
+        assert_eq!(doc.disk_digest(), digest(EXECUTED_NB.as_bytes()));
+        assert_eq!(
+            doc.cell_summary(&doc.tokens()[0]).unwrap().execution_count,
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn run_finished_on_inactive_tab_reconciles_on_switch_back() {
+        let (_t, mut app, nb) = setup(r#"cp executed.json "$7""#);
+        let before = app.tabs[0].editor.lines().join("\n");
+        let plain = nb.with_file_name("plain.txt");
+        fs::write(&plain, "x\n").unwrap();
+        app.run_notebook();
+        app.open_file(plain).unwrap();
+        wait_for_runs(&mut app);
+        app.reload_open_file_from_disk_if_pristine().unwrap();
+        assert_ne!(
+            app.tabs[0].notebook.as_ref().unwrap().disk_digest(),
+            digest(EXECUTED_NB.as_bytes())
+        );
+        app.switch_to_tab(0);
+        assert_notebook_tab_took_run_result(&app, &before);
+        assert!(app.status.starts_with("Run finished in "), "{}", app.status);
+    }
+
+    #[test]
+    fn run_finished_in_unfocused_pane_reconciles_on_focus() {
+        let (_t, mut app, _nb) = setup(r#"cp executed.json "$7""#);
+        let before = app.tabs[0].editor.lines().join("\n");
+        app.run_notebook();
+        app.split_pane(crate::app::SplitDirection::Vertical);
+        app.focus_other_pane();
+        wait_for_runs(&mut app);
+        app.focus_other_pane();
+        assert_notebook_tab_took_run_result(&app, &before);
+    }
+
+    #[test]
+    fn run_finished_on_inactive_tab_reconciles_when_other_tab_closes() {
+        let (_t, mut app, nb) = setup(r#"cp executed.json "$7""#);
+        let before = app.tabs[0].editor.lines().join("\n");
+        let plain = nb.with_file_name("plain.txt");
+        fs::write(&plain, "x\n").unwrap();
+        app.run_notebook();
+        app.open_file(plain).unwrap();
+        wait_for_runs(&mut app);
+        app.close_file();
+        assert_notebook_tab_took_run_result(&app, &before);
+    }
+
     #[test]
     fn run_status_reports_error_cell_from_written_file() {
         let (_t, mut app, nb) = setup(r#"cp errored.json "$7""#);
@@ -566,6 +643,52 @@ cp executed.json "$7""#,
         assert_eq!(fs::read_to_string(&nb).unwrap(), format!("{SOURCE_NB} \n"));
         assert_eq!(fs::read_to_string(executed_path(&nb)).unwrap(), EXECUTED_NB);
         assert!(!run_tmp_path(&nb).exists());
+    }
+
+    #[test]
+    fn second_changed_run_keeps_first_executed_copy() {
+        let (_t, mut app, nb) = setup(
+            r#"echo " " >> "$8"
+cp executed.json "$7""#,
+        );
+        app.run_notebook();
+        wait_for_runs(&mut app);
+        let first = executed_path(&nb);
+        fs::write(&first, "first result").unwrap();
+        app.run_notebook();
+        wait_for_runs(&mut app);
+        assert_eq!(
+            app.status,
+            "Notebook changed during run; results saved to nb.executed-2.ipynb"
+        );
+        assert_eq!(fs::read_to_string(&first).unwrap(), "first result");
+        let second = nb.with_file_name("nb.executed-2.ipynb");
+        assert_eq!(fs::read_to_string(second).unwrap(), EXECUTED_NB);
+        assert_eq!(
+            unused_executed_path(&nb),
+            nb.with_file_name("nb.executed-3.ipynb")
+        );
+    }
+
+    #[test]
+    fn stop_with_several_runs_and_no_match_names_the_problem() {
+        let (_t, mut app, nb) = setup("exec sleep 30");
+        let other = nb.with_file_name("other.ipynb");
+        fs::write(&other, SOURCE_NB).unwrap();
+        app.run_notebook();
+        app.open_file(other).unwrap();
+        app.run_notebook();
+        assert_eq!(app.notebook_runs.len(), 2);
+        let plain = nb.with_file_name("plain.txt");
+        fs::write(&plain, "x\n").unwrap();
+        app.open_file(plain).unwrap();
+        app.stop_notebook_run();
+        assert_eq!(
+            app.status,
+            "Several notebooks are running; open the one to stop"
+        );
+        assert!(app.notebook_runs.iter().all(|r| !r.stopped));
+        app.kill_notebook_runs();
     }
 
     #[test]

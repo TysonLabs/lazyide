@@ -53,6 +53,8 @@ impl App {
             .map(|p| relative_path(&self.root, p).display().to_string())
             .unwrap_or_else(|| "empty pane".to_string());
         self.set_status(format!("Focus: {name}"));
+        // After the focus status, so a reload or error status stays visible.
+        self.reconcile_activated_notebook();
     }
 
     pub(crate) fn split_pane(&mut self, direction: SplitDirection) {
@@ -103,6 +105,7 @@ impl App {
             tab.visible_rows_map.clear();
         }
         self.set_status("Pane closed");
+        self.reconcile_activated_notebook();
     }
 
     /// Move the active tab into the other pane and focus it there.

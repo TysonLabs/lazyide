@@ -79,6 +79,9 @@ pub(crate) struct Tab {
     /// The recovery prompt's notebook text lost its cell tokens (the notebook
     /// changed since the autosave), so no outputs re-attach to it.
     pub(crate) recovery_tokens_stale: bool,
+    /// An autosave written in the other view (raw vs notebook) was not
+    /// offered on open. This tab never deletes or overwrites it.
+    pub(crate) keep_autosave: bool,
 }
 
 /// Syntax language of a tab's text: the notebook's kernel language for a

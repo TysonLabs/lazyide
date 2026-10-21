@@ -259,6 +259,17 @@ In `check_recovery_for_open_file` (`:628-644`):
   text is recovered, but no outputs attach to the wrong cell, and the
   recovery prompt says so.
 
+The sidecar also marks the autosave's view: an autosave is projected cell
+text exactly when its sidecar exists. Recovery is offered only to a tab in
+the same view (a notebook tab needs the sidecar, a raw tab needs none). On a
+mismatch, for example a raw autosave of an `.ipynb` written before notebook
+support that now opens as a notebook, nothing is offered, the status says
+"Autosave for x.ipynb was written in a different view; not recovered", and
+both files stay on disk. The tab sets `keep_autosave`: it never writes,
+clears or deletes that autosave (no autosave for its own edits, none removed
+on save or close). A raw-tab autosave of an `.ipynb` removes a stale
+sidecar, so the pair stays consistent.
+
 The sidecar is removed with the autosave (`core.rs:646-650`, `editor.rs:438`,
 `:474`).
 
@@ -345,7 +356,10 @@ Palette only. A typo cannot start code execution.
    - Exit 0, but the disk changed during the run (a save in lazyide or another
      editor): do **not** overwrite. Keep the result as
      `<name>.executed.ipynb` and show the status "Notebook changed during run;
-     results saved to analysis.executed.ipynb". This covers the race where
+     results saved to analysis.executed.ipynb". An existing file is never
+     overwritten: the first unused of `<name>.executed.ipynb`,
+     `<name>.executed-2.ipynb`, `-3`, ... is used, and the status names the
+     file written. This covers the race where
      `--inplace` would have written the pre-run source over the user's
      edits.
    - Stopped by the user: delete `<tmp>`. Status: "Run stopped".
@@ -365,7 +379,7 @@ Palette only. A typo cannot start code execution.
 | 1 | `src/app/editor.rs:340-348` `open_file_as` | For `.ipynb`: on `project()` Ok, load `projected_text` and set `tab.notebook`; on Err, fall back with status |
 | 2 | `src/util.rs:437-460` `spawn_git_refresh` + `compute_git_line_status` (`:208-255`) | Pass `is_notebook: bool` per tab (from `tab.notebook`); notebooks get an all-`None` gutter. A projected gutter is Phase 3 |
 | 3 | `src/app/git_diff.rs:126-136` diff view Enter | The view still shows the raw JSON diff. On a notebook tab, Enter shows a status and does not jump |
-| 4 | `src/app/search.rs:63-131` project search (Codex F9) | Run the existing rg command with `--glob '!*.ipynb'`. List notebooks with `rg --files --glob '*.ipynb'`, so ignore rules match. For each one, `project()` it and pipe the projected text to `rg --line-number --smart-case <query> -` on stdin. That gives the same regex and smart-case rules with no new dependency. Hits carry projected line numbers, so the jump is exact, and output/metadata text is never searched. A notebook that fails to project is searched raw, as today. Cap at 500 notebooks per search, with a status note when the cap is reached. Classify an rg exit code of 1 (no match) separately from 2 (error) |
+| 4 | `src/app/search.rs:63-131` project search (Codex F9) | Run the existing rg command with `--iglob '!*.ipynb'`. List notebooks with `rg --files --iglob '*.ipynb'`, so ignore rules match (`--iglob`: the extension is case-insensitive, as on open). For each one, `project()` it and pipe the projected text to `rg --line-number --smart-case <query> -` on stdin. That gives the same regex and smart-case rules with no new dependency. Hits carry projected line numbers, so the jump is exact, and output/metadata text is never searched. A notebook that fails to project is searched raw, as today. Cap at 500 notebooks per search, with a status note when the cap is reached. Classify an rg exit code of 1 (no match) separately from 2 (error) |
 | 5 | `src/app/file_tree.rs:466-490` rename (Codex F10) | **Before** `fs::rename` (`:486`), find open tabs at or under the target whose notebook mode would change. If any is dirty, refuse ("Save x.ipynb before renaming"). After the rename, close and reopen the affected clean tabs |
 | 6 | `src/util.rs:467-607` fold callers | Add `compute_cell_fold_ranges(lines)` (from a marker to the line before the next marker) and merge it in for notebook tabs |
 | 7 | `src/ui/mod.rs` line render | Draw marker lines in the accent color, bold, so cells are visibly separated |
@@ -374,7 +388,11 @@ Blast-radius notes:
 - `open_disk_snapshot` readers are only the conflict paths.
 - `dirty` is a flag set by `mark_dirty` and is never compared to the snapshot.
 - `poll_fs_changes` (`src/app/core.rs:226-297`) checks only the active tab.
-  This is existing behaviour, unchanged.
+  This is existing behaviour, unchanged. A notebook tab can therefore miss a
+  change (for example a run that finished while another tab or pane was
+  active), so activating a notebook tab (`switch_to_tab`, `focus_other_pane`,
+  `close_tab_at`, `close_pane`) runs the same reconcile once
+  (`reconcile_activated_notebook`). Raw tabs are not checked on activation.
 - `all_tabs()` iterations (autosave, git refresh, LSP diagnostics, rename
   retarget, dirty check, wrap rebuild) were each checked. Autosave gains the
   digest sidecar, git refresh gains `is_notebook`, rename gains the preflight,
@@ -406,8 +424,8 @@ branch is checked against them.
    `keybinds.json` binding on the same key keeps working. Test: a user
    override that binds `alt+c` to an existing action still resolves to that
    action.
-5. **Search without notebooks is unchanged.** If `rg --files --glob '*.ipynb'`
-   finds no notebooks, project search runs exactly today's rg command (same
+5. **Search without notebooks is unchanged.** If `rg --files --iglob '*.ipynb'`
+   finds no notebooks (case-insensitive), project search runs exactly today's rg command (same
    args, one process, same result order). Test the argument list. With
    notebooks present, the extra cost is one `rg --files` pass plus one rg
    process per notebook, capped at 500.
