@@ -74,8 +74,10 @@ impl App {
                         return Ok(SaveOutcome::Failed);
                     }
                 } else {
+                    // Nothing to write: the clean buffer now shows the disk
+                    // version; keep the reload status.
                     self.reload_pristine_notebook(&path)?;
-                    return Ok(SaveOutcome::Saved);
+                    return Ok(SaveOutcome::Failed);
                 }
             }
         }
@@ -668,6 +670,12 @@ mod tests {
         assert!(app.tabs[0].conflict_prompt_open);
         assert_eq!(fs::read_to_string(&path).expect("read"), disk);
         assert!(app.tabs[0].dirty);
+        // A clean tab reloads instead of saving, and says so.
+        let (mut app, path) = open(tmp.path(), "clean.ipynb", V44);
+        fs::write(&path, V44.replace("\"y = 2\"", "\"y = 3\"")).expect("write");
+        assert_eq!(app.save_file().expect("save"), SaveOutcome::Failed);
+        assert_eq!(app.status, "Reloaded clean.ipynb from disk");
+        assert!(lines(&app).contains(&"y = 3".to_string()));
     }
 
     /// Plan test 12: a structural change raises the conflict prompt; `K`
