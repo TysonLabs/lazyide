@@ -390,6 +390,19 @@ pub(crate) fn render_help(app: &mut App, frame: &mut Frame<'_>) {
             sep_s,
         ),
         help_keybind_line(
+            &[
+                (&kb.display_for(KeyAction::NextCell), "next cell"),
+                (&kb.display_for(KeyAction::PrevCell), "prev cell"),
+                (
+                    &kb.display_for(KeyAction::InsertCellBelow),
+                    "insert cell (notebooks)",
+                ),
+            ],
+            key_s,
+            desc_s,
+            sep_s,
+        ),
+        help_keybind_line(
             &[(
                 &kb.display_for(KeyAction::GoToDefinition),
                 "go to definition",

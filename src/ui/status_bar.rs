@@ -14,6 +14,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::App;
 use crate::keybinds::{KeyAction, KeyBindings};
+use crate::notebook::{CellKind, buffer_cell_text, cell_rows, parse_marker};
+use crate::tab::Tab;
 use crate::theme::Theme;
 use crate::types::Focus;
 use crate::util::relative_path;
@@ -142,6 +144,10 @@ fn center_content(app: &App, theme: &Theme) -> (String, Style) {
     }
     if let Some(path) = app.open_path() {
         let mut crumbs = breadcrumbs(&app.root, path);
+        if let Some(cell) = app.active_tab().and_then(notebook_cell_status) {
+            crumbs.push_str(" › ");
+            crumbs.push_str(&cell);
+        }
         if app.is_dirty() {
             crumbs.push_str(" ●");
         }
@@ -151,6 +157,55 @@ fn center_content(app: &App, theme: &Theme) -> (String, Style) {
         keybind_hints(&app.keybinds),
         Style::default().fg(theme.fg_muted),
     )
+}
+
+/// The cursor's cell on a notebook tab: `cell 4/12 · [7] · text, image/png`,
+/// `cell 5/12 · [8] · error: KeyError`, `cell 6/12 · edited, outputs stale`
+/// or `new cell`. Numbers are disk cell positions. Scans only the cursor's
+/// cell, so the per-frame cost is bounded by the cell's length.
+pub(crate) fn notebook_cell_status(tab: &Tab) -> Option<String> {
+    let doc = tab.notebook.as_ref()?;
+    let lines = tab.editor.lines();
+    let (marker_row, end) = cell_rows(lines, tab.editor.cursor().0);
+    let marker_row = marker_row?;
+    let marker = parse_marker(&lines[marker_row])?;
+    // No token, a foreign token, or a changed type: saved as a new cell.
+    let known = marker
+        .token
+        .as_deref()
+        .and_then(|t| Some((t, doc.cell_summary(t)?)))
+        .filter(|(_, s)| s.kind == marker.kind);
+    let Some((token, summary)) = known else {
+        return Some("new cell".to_string());
+    };
+    let mut out = format!("cell {}/{}", summary.index + 1, summary.cell_count);
+    let edited =
+        doc.cell_visible_text(token) != Some(buffer_cell_text(lines, marker_row, end).as_str());
+    let has_outputs = summary.execution_count.is_some() || !summary.output_kinds.is_empty();
+    match summary.kind {
+        CellKind::Code if edited && has_outputs => out.push_str(" · edited, outputs stale"),
+        CellKind::Code if edited => out.push_str(" · edited"),
+        CellKind::Code => {
+            match summary.execution_count {
+                Some(n) => out.push_str(&format!(" · [{n}]")),
+                None => out.push_str(" · [ ]"),
+            }
+            if let Some(ename) = &summary.error {
+                out.push_str(&format!(" · error: {ename}"));
+            } else if summary.output_kinds.is_empty() {
+                out.push_str(" · no output");
+            } else {
+                out.push_str(" · ");
+                out.push_str(&summary.output_kinds.join(", "));
+            }
+        }
+        CellKind::Markdown => out.push_str(" · markdown"),
+        CellKind::Raw => out.push_str(" · raw"),
+    }
+    if edited && summary.kind != CellKind::Code {
+        out.push_str(" · edited");
+    }
+    Some(out)
 }
 
 /// `src › app › input.rs` for a path under `root`.
@@ -201,8 +256,115 @@ fn keybind_hints(kb: &KeyBindings) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{breadcrumbs, fit_center};
+    use super::{breadcrumbs, center_content, fit_center, notebook_cell_status};
+    use crate::app::App;
+    use std::fs;
     use std::path::Path;
+    use std::time::Instant;
+    use tempfile::tempdir;
+
+    /// Open the executed fixture as `analysis.ipynb` (a notebook tab).
+    fn open_executed_notebook(root: &Path) -> App {
+        let path = root.join("analysis.ipynb");
+        fs::write(
+            &path,
+            include_str!("../notebook/testdata/lab45_executed.ipynb"),
+        )
+        .expect("write");
+        let mut app = App::new(root.to_path_buf()).expect("app");
+        app.open_file(path).expect("open");
+        assert!(app.active_tab().expect("tab").is_notebook());
+        app
+    }
+
+    fn status_at(app: &mut App, row: usize) -> Option<String> {
+        let tab = app.active_tab_mut().expect("tab");
+        tab.editor
+            .move_cursor(ratatui_textarea::CursorMove::Jump(row as u16, 0));
+        notebook_cell_status(app.active_tab().expect("tab"))
+    }
+
+    fn marker_rows(app: &App) -> Vec<usize> {
+        let tab = app.active_tab().expect("tab");
+        (0..tab.editor.lines().len())
+            .filter(|&r| tab.editor.lines()[r].starts_with("# %%"))
+            .collect()
+    }
+
+    #[test]
+    fn notebook_cell_status_summarizes_the_cursor_cell() {
+        let tmp = tempdir().expect("tempdir");
+        let mut app = open_executed_notebook(tmp.path());
+        let m = marker_rows(&app);
+        let at = |app: &mut App, row| status_at(app, row).expect("summary");
+        assert_eq!(at(&mut app, m[0] + 1), "cell 1/7 · markdown");
+        assert_eq!(at(&mut app, m[1]), "cell 2/7 · [1] · stream");
+        assert_eq!(at(&mut app, m[2] + 3), "cell 3/7 · [2] · image/png");
+        assert_eq!(at(&mut app, m[3] + 1), "cell 4/7 · [3] · text");
+        assert_eq!(at(&mut app, m[4] + 2), "cell 5/7 · [4] · error: KeyError");
+        assert_eq!(at(&mut app, m[5] + 3), "cell 6/7 · raw");
+        assert_eq!(at(&mut app, m[6] + 1), "cell 7/7 · [ ] · no output");
+
+        // Edited cells: a code cell's outputs are stale.
+        for row in [m[1] + 1, m[0] + 1] {
+            status_at(&mut app, row);
+            let tab = app.active_tab_mut().expect("tab");
+            tab.editor.insert_str("# y\n");
+        }
+        let m = marker_rows(&app);
+        assert_eq!(at(&mut app, m[0] + 1), "cell 1/7 · markdown · edited");
+        assert_eq!(at(&mut app, m[1] + 1), "cell 2/7 · edited, outputs stale");
+        assert_eq!(at(&mut app, m[2] + 1), "cell 3/7 · [2] · image/png");
+
+        // New cell (no token).
+        app.notebook_insert_cell_below();
+        let row = app.active_tab().expect("tab").editor.cursor().0;
+        assert_eq!(at(&mut app, row), "new cell");
+    }
+
+    #[test]
+    fn notebook_cell_status_is_none_on_a_raw_tab() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("a.py");
+        fs::write(&path, "# %% #abcdef\nx = 1\n").expect("write");
+        let mut app = App::new(tmp.path().to_path_buf()).expect("app");
+        app.open_file(path).expect("open");
+        assert_eq!(status_at(&mut app, 1), None);
+    }
+
+    #[test]
+    fn notebook_cell_status_marks_an_added_blank_line_as_edited() {
+        let tmp = tempdir().expect("tempdir");
+        let mut app = open_executed_notebook(tmp.path());
+        let last_marker = *marker_rows(&app).last().expect("marker");
+        status_at(&mut app, last_marker + 1);
+
+        // The final cell starts with no body lines. Enter adds one empty body
+        // line before the buffer's trailing line, which rebuild saves as a
+        // source newline and must therefore count as an edit.
+        app.active_tab_mut().expect("tab").editor.insert_newline();
+
+        assert_eq!(
+            notebook_cell_status(app.active_tab().expect("tab")),
+            Some("cell 7/7 · edited".to_string())
+        );
+    }
+
+    #[test]
+    fn center_content_appends_the_cell_and_keeps_status_priority() {
+        let tmp = tempdir().expect("tempdir");
+        let mut app = open_executed_notebook(tmp.path());
+        let m = marker_rows(&app);
+        status_at(&mut app, m[4] + 1);
+        app.status.clear();
+        let theme = app.active_theme().clone();
+        let (text, _) = center_content(&app, &theme);
+        assert_eq!(text, "analysis.ipynb › cell 5/7 · [4] · error: KeyError");
+
+        app.status = "Saved".to_string();
+        app.status_set_at = Some(Instant::now());
+        assert_eq!(center_content(&app, &theme).0, "Saved");
+    }
 
     #[test]
     fn breadcrumbs_join_components_relative_to_root() {
