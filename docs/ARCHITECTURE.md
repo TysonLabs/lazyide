@@ -141,6 +141,8 @@ Each theme defines: background, foreground, accent, selection, border colors + s
 
 Lightweight, line-at-a-time highlighting in `highlight_line()`. No AST — just keyword matching, string/comment detection, and bracket depth tracking. Supports 11 language families detected by file extension.
 
+The language is a property of the tab: `Tab::syntax_lang()` returns the notebook's kernel language for a notebook tab (`tab.notebook.is_some()`) and `syntax_lang_for_path()` otherwise. Highlighting, folds, keyword completion and toggle comment (`Tab::comment_prefix()`) all read it, and `open_file_as` uses the same `tab_syntax_lang()` helper before the tab exists. On notebook tabs, `compute_tab_fold_ranges()` adds one fold per cell (`compute_cell_fold_ranges()`: marker line to the line before the next marker), and cell marker lines draw in the accent colour, bold. A `.ipynb` opened as raw JSON is a normal text tab.
+
 Bracket colorization uses a depth counter computed per-file in `compute_fold_ranges()`, cycling through 3 theme-defined colors.
 
 ## File Tree
@@ -153,9 +155,9 @@ Git status is computed by shelling out to `git` (no libgit2 dependency):
 
 - **Branch**: `git rev-parse --abbrev-ref HEAD` → top bar display
 - **File statuses**: `git status --porcelain -z` → NUL-separated parsing for safe handling of paths with spaces/special characters. Statuses propagate up to parent directories (Modified > Added > Untracked priority, matching VS Code behavior).
-- **Line statuses**: `git diff HEAD -- <file>` → unified diff hunk parsing. Falls back to `git status --porcelain` for untracked files (all lines marked Added). Stored per-tab in `Tab.git_line_status`.
+- **Line statuses**: `git diff HEAD -- <file>` → unified diff hunk parsing. Falls back to `git status --porcelain` for untracked files (all lines marked Added). Stored per-tab in `Tab.git_line_status`. Notebook tabs get an all-`None` gutter (the diff is of the raw JSON, not the projected cell text); a `.ipynb` opened as raw JSON keeps the normal gutter.
 - **Change summary**: `GitChangeSummary` counts (modified/added/untracked) shown in top bar as `Δ: ~M +A ?U`.
-- **Diff view**: `diff::git_diff_for_file` runs `git diff HEAD -- <file>` (untracked files become all-added) and `parse_unified_diff` pairs removed/added runs into `DiffRow`s; `ui/overlays.rs::render_diff_view` draws them side by side with hunk headers. `app/git_diff.rs` owns the keys (n/p hunks, Enter jumps) and `Alt+N`/`Alt+P` change jumps via `diff::next_change_row` over the gutter statuses.
+- **Diff view**: `diff::git_diff_for_file` runs `git diff HEAD -- <file>` (untracked files become all-added) and `parse_unified_diff` pairs removed/added runs into `DiffRow`s; `ui/overlays.rs::render_diff_view` draws them side by side with hunk headers. `app/git_diff.rs` owns the keys (n/p hunks, Enter jumps; on a notebook tab Enter shows a status instead of jumping) and `Alt+N`/`Alt+P` change jumps via `diff::next_change_row` over the gutter statuses.
 - **Refresh triggers**: file open, file save, and FS change events. FS refresh uses path-aware event coalescing — only affected tabs recompute line status, with full fallback for `.git/` changes or ambiguous events.
 
 ## Testing

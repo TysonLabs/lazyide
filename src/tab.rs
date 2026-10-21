@@ -1,9 +1,12 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ratatui_textarea::TextArea;
 
 use crate::lsp_client::LspDiagnostic;
+use crate::notebook::NotebookDoc;
+use crate::syntax::{SyntaxLang, comment_start_for_lang, syntax_lang_for_path};
+use crate::util::comment_prefix_for_path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum GitLineStatus {
@@ -71,5 +74,34 @@ pub(crate) struct Tab {
     pub(crate) git_line_status: Vec<GitLineStatus>,
     /// Set when this tab shows a projected notebook; None for raw text (incl. .ipynb fallback).
     #[allow(dead_code)] // TEMPORARY (skeleton): removed once open_file_as reads it.
-    pub(crate) notebook: Option<crate::notebook::NotebookDoc>,
+    pub(crate) notebook: Option<NotebookDoc>,
+}
+
+/// Syntax language of a tab's text: the notebook's kernel language for a
+/// notebook tab, the path's extension otherwise. Shared by `Tab::syntax_lang`
+/// and `open_file_as` (which needs it before the `Tab` exists).
+pub(crate) fn tab_syntax_lang(path: &Path, notebook: Option<&NotebookDoc>) -> SyntaxLang {
+    match notebook {
+        Some(doc) => doc.lang(),
+        None => syntax_lang_for_path(Some(path)),
+    }
+}
+
+impl Tab {
+    pub(crate) fn is_notebook(&self) -> bool {
+        self.notebook.is_some()
+    }
+
+    pub(crate) fn syntax_lang(&self) -> SyntaxLang {
+        tab_syntax_lang(&self.path, self.notebook.as_ref())
+    }
+
+    /// Line-comment prefix for toggle comment: the notebook language's prefix
+    /// on a notebook tab, the path-based prefix otherwise.
+    pub(crate) fn comment_prefix(&self) -> Option<&'static str> {
+        match &self.notebook {
+            Some(doc) => comment_start_for_lang(doc.lang()),
+            None => comment_prefix_for_path(&self.path),
+        }
+    }
 }

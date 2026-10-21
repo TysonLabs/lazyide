@@ -16,13 +16,35 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::lsp_client::LspDiagnostic;
-use crate::syntax::{highlight_line, syntax_lang_for_path};
+use crate::notebook::is_marker_like;
+use crate::syntax::{SyntaxLang, highlight_line};
 use crate::tab::{FoldRange, GitLineStatus};
 use crate::types::Focus;
 use crate::types::PendingAction;
 use crate::util::segment_has_selection;
 use helpers::{apply_indent_guides, apply_selection_to_spans, clip_spans_by_columns};
 use overlays::*;
+
+/// Highlighted spans for one line segment. On a notebook tab a cell marker
+/// line draws in the accent colour, bold, so cells stand out; every other
+/// line (and every line of a raw tab) uses normal syntax highlighting.
+fn line_content_spans(
+    segment_text: &str,
+    full_line: &str,
+    is_notebook: bool,
+    lang: SyntaxLang,
+    theme: &crate::theme::Theme,
+    bracket_depth: u16,
+) -> Vec<Span<'static>> {
+    if is_notebook && is_marker_like(full_line) {
+        let style = Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD);
+        return vec![Span::styled(segment_text.to_string(), style)];
+    }
+    let bracket_colors = [theme.bracket_1, theme.bracket_2, theme.bracket_3];
+    highlight_line(segment_text, lang, theme, bracket_depth, &bracket_colors).spans
+}
 
 fn slice_chars(s: &str, start: usize, end: usize) -> String {
     let count = end.saturating_sub(start);
@@ -335,7 +357,8 @@ fn render_editor_pane(
             app.rebuild_visible_rows();
         }
     }
-    let lang = syntax_lang_for_path(app.open_path().map(|p| p.as_path()));
+    let lang = app.active_syntax_lang();
+    let is_notebook = app.active_tab().is_some_and(|t| t.is_notebook());
     let visible_rows = inner.height as usize;
     if app
         .active_tab()
@@ -560,14 +583,14 @@ fn render_editor_pane(
         spans.push(Span::styled("│", Style::default().fg(theme.border)));
         spans.push(Span::raw(" "));
         let segment_text = slice_chars(&lines_ref[row], seg_start, seg_end).replace('\t', "    ");
-        let bracket_colors = [theme.bracket_1, theme.bracket_2, theme.bracket_3];
         let bd = bracket_depths_ref.get(row).copied().unwrap_or(0);
-        let hl = highlight_line(&segment_text, lang, theme, bd, &bracket_colors);
+        let hl_spans =
+            line_content_spans(&segment_text, &lines_ref[row], is_notebook, lang, theme, bd);
         let guide_depth = indent_depths.get(row).copied().unwrap_or(0);
         let content_spans = if is_first_segment {
-            apply_indent_guides(hl.spans, guide_depth, guide_style)
+            apply_indent_guides(hl_spans, guide_depth, guide_style)
         } else {
-            hl.spans
+            hl_spans
         };
         let content_width = inner_w.saturating_sub(App::EDITOR_GUTTER_WIDTH as usize);
         let content_spans = if !app.word_wrap && scroll_col > 0 {
@@ -820,4 +843,39 @@ fn render_minimap(
         ]));
     }
     frame.render_widget(Paragraph::new(out), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::line_content_spans;
+    use crate::syntax::{SyntaxLang, highlight_line};
+    use ratatui::style::Modifier;
+
+    fn theme() -> crate::theme::Theme {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let app = crate::app::App::new(tmp.path().to_path_buf()).expect("app");
+        app.active_theme().clone()
+    }
+
+    #[test]
+    fn notebook_marker_line_renders_accent_bold() {
+        let theme = theme();
+        let line = "# %% [markdown] #abc123";
+        let spans = line_content_spans(line, line, true, SyntaxLang::Python, &theme, 0);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content, line);
+        assert_eq!(spans[0].style.fg, Some(theme.accent));
+        assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn raw_tab_marker_line_and_notebook_code_line_use_syntax_highlight() {
+        let theme = theme();
+        let bc = [theme.bracket_1, theme.bracket_2, theme.bracket_3];
+        for (line, is_notebook) in [("# %%", false), ("x = f(1)  # %%", true)] {
+            let got = line_content_spans(line, line, is_notebook, SyntaxLang::Python, &theme, 0);
+            let want = highlight_line(line, SyntaxLang::Python, &theme, 0, &bc).spans;
+            assert_eq!(got, want, "{line}");
+        }
+    }
 }
