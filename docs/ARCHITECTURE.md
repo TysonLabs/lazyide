@@ -19,6 +19,7 @@ src/
     search.rs          Find/replace in file, project search (ripgrep; notebooks searched by projected cell text)
     git_diff.rs        Diff view open/scroll/hunk keys, next/previous change jumps
     panes.rs           Two-pane split: swap-based focus, split/close/move, layout, divider drag
+    notebook_run.rs    Run notebook / Stop run: nbconvert child process, result classification
   ui/
     mod.rs             Main draw() function (layout, tree pane, tab row, editor pane)
     status_bar.rs      Structured status bar (mode, branch, breadcrumbs, cursor, diagnostics)
@@ -77,6 +78,8 @@ lib.rs: run_app()
 Every pending action has key handling in `handle_pending_key()` (`app/input_handlers.rs`) and a status hint in `util::pending_hint`. The modal ones (close prompt, delete, notebook reformat) also have a dialog in `ui/overlays.rs` and are mouse modals in `handle_mouse()` (a click outside cancels them). Quit is status-only: no dialog and no mouse modal.
 
 **Save flow.** `save_file()` returns `SaveOutcome`: `Saved` (the buffer is on disk), `Deferred` (nothing written yet; a prompt asks first) or `Failed` (nothing written, including "No file open"; the status says why). I/O errors stay `Err`. The Save key and the palette Save only save. The close prompt (Enter / Ctrl+S) goes through `save_and_close_file()`, which closes the tab only on `Saved`; on `Deferred` it sets `then_close` on the pending `NotebookReformat` prompt. That prompt asks before a save changes a notebook's JSON whitespace: `y` sets the tab's `reformat_confirmed` (kept for the tab's lifetime), saves, and closes only if `then_close` and the save returned `Saved`; `n` / Esc leaves the tab open and dirty.
+
+**Run notebook.** `run_notebook()` (palette only) refuses a non-notebook or dirty tab and a second run for the same path, records the disk digest, and spawns `nbconvert_command()` (program from `App::jupyter_cmd`, `["jupyter"]` by default; tests swap in a fake script). The `Child` lives in `App::notebook_runs`, not on the tab, so a run outlives its tab; a thread drains stderr. `poll_notebook_runs()` in the event loop calls `try_wait()` and classifies the exit: stopped (delete the temp file), non-zero (last stderr line, delete the temp file), success with an unchanged disk digest (rename `.<name>.lazyide-run.ipynb` over the notebook; the fs watcher then reloads it), or success with a changed digest (keep it as `<name>.executed.ipynb`). File-tree rename and move retarget active runs (`retarget_notebook_runs()`). The success status reads `error_cells()` from the written file, never the exit code. `App::drop` kills active runs.
 
 **Rename and notebook mode.** A tab's notebook mode (`tab.notebook.is_some()`) is decided when the file opens. Before a tree rename touches disk, `tabs_changing_notebook_mode()` finds open tabs (both panes) at or under the target whose mode the new name would change (to or from an `.ipynb` extension, case-insensitive; `.ipynb` to `.ipynb` keeps the mode). If any is dirty, the rename is refused with "Save <name> before renaming". After the rename, the affected clean tabs are closed and reopened in the same pane and slot, keeping the active tab and focus. Move keeps the file name, so it never changes the mode.
 

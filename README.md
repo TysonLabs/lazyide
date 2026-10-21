@@ -92,6 +92,13 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Command palette** — `Ctrl+P` for quick access to all actions
 - **Autosave & recovery** — buffers saved every 2s, crash recovery on reopen
 
+### Run notebook
+- **Notebook: Run all (nbconvert)** (command palette only) runs the whole notebook in the current tab with `jupyter nbconvert --to notebook --execute --allow-errors`, in the notebook's directory, with the notebook's own kernel. It needs `jupyter nbconvert` and `ipykernel` (`pip install nbconvert ipykernel`). There is no single-cell run and no live kernel.
+- Save first: a tab with unsaved changes is refused ("Save before running"). One run per notebook at a time; the status bar shows "Running x.ipynb…" while it runs.
+- `--allow-errors` keeps going after a failing cell and writes its traceback, so the status reports the first failing cell ("Run finished: cell 5 raised KeyError") or "Run finished in 12s". A run that fails to start (for example a missing kernel) shows the error and leaves the notebook unchanged.
+- The result replaces the notebook on disk, and the open tab picks up the new outputs. If the notebook changed on disk during the run, it is not overwritten: the result is saved as `x.executed.ipynb` next to it.
+- **Notebook: Stop run** kills the run and discards its partial result. A run continues if its tab is closed, and its result is still applied and reported. Quitting lazyide stops active runs.
+
 ## Keyboard
 
 <details>
@@ -204,6 +211,7 @@ Requires Rust 2024 edition.
 | [rust-analyzer](https://rust-analyzer.github.io/manual.html#installation) | LSP completions, diagnostics, go-to-definition | `lazyide --setup` |
 | [ripgrep](https://github.com/BurntSushi/ripgrep#installation) | Project-wide search | `lazyide --setup` |
 | git | Branch display, gutter markers | System package manager |
+| jupyter nbconvert + ipykernel | Run notebook | `pip install nbconvert ipykernel` |
 
 ## Documentation
 
