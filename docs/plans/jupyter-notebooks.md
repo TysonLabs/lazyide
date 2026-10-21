@@ -1,6 +1,6 @@
 # Plan: Jupyter notebook (`.ipynb`) editing
 
-Status: revised after Codex plan review (rev 2) · Branch: `feat/jupyter-notebooks` ·
+Status: revised after Codex plan review and confirmation round (rev 3) · Branch: `feat/jupyter-notebooks` ·
 Issue: [#51](https://github.com/TysonLabs/lazyide/issues/51)
 
 ## Goal
@@ -29,33 +29,41 @@ byte-identical when nothing changed.
 ### Projection format (jupytext "percent" style with identity tokens)
 
 ```
-# %% #1
+# %% #k3x9qa
 import pandas as pd
 df = pd.read_csv("x.csv")
 
-# %% [markdown] #2
+# %% [markdown] #p0d7mz
 # # Title
 #
 # Some *markdown* text.
 
-# %% [raw] #3
+# %% [raw] #b81fte
 # raw cell text
 ```
 
 - One marker line per cell. The marker grammar is
-  `^# %%( \[(markdown|raw)\])?( #[0-9]+)?$`.
-- **Identity token `#N`** = the cell's 1-based index in the notebook on disk,
-  as of the last open, reload or save. It is the only thing that ties a
-  projected cell to its JSON cell. Source text and position are never used
-  for identity (Codex F1). After a save or reload, the marker lines are
-  renumbered in place (see *Save*).
+  `^# %%( \[(markdown|raw)\])?( #[0-9a-z]{6})?$`.
+- **Identity token** = 6 random base-36 characters, assigned to each cell when
+  the tab loads the notebook (open, reload, `R`). The token is opaque, scoped
+  to the doc and **never renumbered** (Codex rev-2 F3, F5). `NotebookDoc`
+  keeps a token table from token to cell. Tokens are not written to the
+  `.ipynb`. A token pasted from another notebook is not in this table, so it
+  is a new cell (a collision has probability ≈ cells / 36⁶). Source text and
+  position are never used for identity (Codex F1).
 - Token rules at save:
   - No token: a new cell.
-  - A token that is out of range: a new cell.
+  - A token not in the table: a new cell.
   - A token used twice (for example a copy-pasted cell): the first occurrence
     in buffer order keeps the identity, and the later ones are new cells.
   - A known token whose marker type changed (code → markdown): a new cell.
     Code outputs must not move onto a markdown cell.
+- **Malformed markers fail the save (Codex rev-2 F4).** Any line that starts
+  with `# %%` but does not match the full grammar (for example a half-typed
+  `# %% #`) makes `rebuild` return an error. `save_file` returns `Failed` with
+  "Malformed cell marker at line N", and nothing is written. Projection
+  fallback and save validation use the same `is_marker_like` / `parse_marker`
+  pair.
 - Code cell lines appear verbatim. Markdown and raw lines get a `# ` prefix,
   and an empty line becomes `#`. On parse, strip `# `, or turn a lone `#` into
   an empty line, and keep any other line verbatim.
@@ -80,7 +88,7 @@ drops `\r`. Losslessness therefore does not depend on parsing back:
   flat module layout:
   - `project(bytes: &str) -> Result<NotebookDoc, NotebookOpenError>`.
   - `rebuild(doc: &NotebookDoc, edited: &str) -> Result<Rebuilt, NotebookSaveError>`.
-    `Rebuilt` holds the bytes to write plus the renumbered projected text.
+    `Rebuilt` holds the bytes to write plus the token assignments for new cells.
   - `strip_tokens(text) -> String` (used by recovery).
 - `NotebookDoc` holds:
   - `original_bytes: String` and `disk_digest: u64` (std `DefaultHasher`,
@@ -157,10 +165,17 @@ four callers handle it:
    - Deleted cells are dropped.
 4. Edited cells keep their outputs and `execution_count`. Jupyter and VS Code
    do the same: the outputs are stale until the cell runs again.
-5. The returned projected text has the markers renumbered (`#1…#n`) and new
-   cells tokenized. The tab replaces **only the marker lines** in the editor
-   buffer. The row count is unchanged, so the cursor and scroll stay put.
-   Then `open_disk_snapshot = projected`, and `doc = project(written_bytes)`.
+5. After the write, `doc` is updated in place: each existing token points at
+   its cell in the written file, and `original_bytes` and `disk_digest` are
+   the written bytes. A doc is never re-projected after our own save, so
+   existing tokens never change. Each new (tokenless) cell gets a token,
+   which is appended to its marker line through the `TextArea` editing API
+   (`move_cursor` + `insert_str`, then the cursor and selection are restored).
+   That keeps undo history: the token insertion is one extra undo step,
+   which the README notes. `replace_editor_text` is not used here, because it
+   rebuilds the `TextArea` and drops undo history (`src/app/editor.rs:147`).
+   Then `open_disk_snapshot` is set to the buffer text, and `dirty` is
+   cleared.
 
 ### Writing bytes (Codex F4, F7)
 
@@ -206,28 +221,42 @@ The comparison uses **raw bytes** (`disk_digest`) and projected text separately.
   Our own save writes bytes whose digest is recorded, so it is a no-op.
 - **`maybe_flag_external_conflict`** (`src/app/core.rs:652-674`) on a dirty
   tab whose disk digest changed:
-  - If the disk cells have the same count, types and visible texts as the
-    current `doc`, only outputs, metadata or execution counts changed (for
-    example after `nbconvert --execute`). Swap `doc` to the disk doc
-    silently. The tokens stay valid, because the indices are unchanged. Status:
-    "Notebook outputs updated on disk".
+  - **Silent adopt only when the cell mapping is provable (Codex rev-2
+    F2).** The disk cells must have the same count, types and visible texts
+    as the current `doc`, in the same order. For `nbformat_minor >= 5`, the
+    cell-id sequence must also be unchanged. For older notebooks, no two
+    cells may share the same (type, visible text). If the check passes, only
+    outputs, metadata or execution counts changed (for example after
+    `nbconvert --execute`). The doc's raw cells, `original_bytes` and
+    `disk_digest` are then replaced, and each token keeps pointing at the
+    same index. Status: "Notebook outputs updated on disk".
   - Otherwise raise the existing conflict prompt, with a projected
     `conflict_disk_text` and the disk `NotebookDoc` stored next to it.
-- **Conflict keys** (`src/app/input_handlers.rs:839-881`): `R` loads the disk
-  text and the disk doc. `K` keeps the buffer and adopts the disk doc as the
-  base, so the next save rebases onto the new outputs. The buffer's tokens
-  then refer to the disk doc's indices, and step 1's rules apply (missing or
-  changed means new). `D` also adopts the disk doc.
+- **Conflict keys** (`src/app/input_handlers.rs:839-881`):
+  - `R` loads the disk text and the disk doc, with fresh tokens.
+  - `K`, `D` and `Esc` keep the buffer **and keep the old doc** as the save
+    base, so the next save overwrites the disk, as "keep mine" does for text
+    files. The disk doc is dropped, and no token is ever rebound to another
+    notebook's cells (Codex rev-2 F1). Status: "Kept local version; saving
+    will overwrite the notebook on disk".
 
 ### Autosave and recovery
 
-The autosave stays as projected text (`src/app/core.rs:610-626`). Next to it,
-write `<autosave>.nbdigest` containing the `disk_digest` the tokens refer to.
-In `check_recovery_for_open_file` (`:628-644`), a mismatched or missing
-digest means the tokens are stale. The recovered text then goes through
-`strip_tokens`, so every cell becomes new: text is recovered, but outputs are
-not attached to the wrong cell. The recovery prompt says so. The digest file
-is removed with the autosave (`core.rs:646-650`, `editor.rs:438`, `:474`).
+The autosave stays as projected text (`src/app/core.rs:610-626`). Tokens are
+random per load, so next to the autosave write `<autosave>.nbtokens`
+(JSON: `disk_digest`, plus the token for each disk cell index).
+
+In `check_recovery_for_open_file` (`:628-644`):
+- If the sidecar's digest equals the current disk digest, the new doc
+  **adopts the sidecar's tokens** for its cells, so the recovered text binds
+  exactly.
+- If the digest differs, or the sidecar is missing or unreadable, the
+  recovered text goes through `strip_tokens`, so every cell becomes new. The
+  text is recovered, but no outputs attach to the wrong cell, and the
+  recovery prompt says so.
+
+The sidecar is removed with the autosave (`core.rs:646-650`, `editor.rs:438`,
+`:474`).
 
 ### Other touchpoints
 
@@ -287,12 +316,20 @@ Unit tests (`src/notebook.rs`):
 9. Each fallback reason returns `Err`.
 
 App-level tests (`tempdir` + `App::new` + `open_file`):
-10. Save, then fs poll: the buffer stays projected, and the markers are
-    renumbered without moving the cursor.
+10. Save, then fs poll: the buffer stays projected, and existing tokens are
+    unchanged. A new cell gets a token, and Ctrl+Z after the save still
+    reaches the user's own edit (rev-2 F5).
 11. Outputs-only external change on a dirty tab: no conflict, and the next
     save keeps the new outputs together with the local edit (F3).
-12. A structural external change on a dirty tab raises the conflict prompt.
-    `K` then save rebases onto the disk doc.
+12. A structural external change on a dirty tab (insert a cell before A)
+    raises the conflict prompt. `K` then save writes the local version, and
+    no cell gets another cell's outputs (rev-2 F1).
+12a. External swap of two cells with identical source in a pre-4.5 notebook
+     raises the conflict prompt instead of a silent adopt (rev-2 F2).
+12b. A cell pasted from another notebook (foreign token) saves as a new cell
+     (rev-2 F3).
+12c. Save with a half-typed `# %% #` marker fails with the line number, and
+     the file is unchanged (rev-2 F4).
 13. A non-canonical notebook, close prompt, Enter: the reformat prompt shows
     and the tab stays open. Answering `y` saves and closes; answering `n`
     keeps the tab dirty (F5).
@@ -316,7 +353,7 @@ Gate (the same as CI): `cargo fmt --all -- --check`,
 
 - `README.md`:
   - the Editor features list (`:68-75`);
-  - a new "Notebooks" section: the format, the `#N` tokens, what is kept, the
+  - a new "Notebooks" section: the format, the `#xxxxxx` cell tokens (not saved to the file), what is kept, the
     edited-source normalization, the reformat prompt, fallback, no execution,
     the `nbconvert` tip, and outputs refreshing on disk change;
   - the Git section note: no gutter for notebooks, and the diff view shows
@@ -358,6 +395,19 @@ checking the code):
 - F9: projected search.
 - F10: rename preflight.
 - F11: language on the tab.
+
+Rev 3 folds in the Codex confirmation round, which found prior F2 and F4–F11
+fixed and F1 and F3 partly fixed. All five new findings were verified and
+accepted:
+- rev-2 F1: `K`/`D`/`Esc` keep the old doc, and nothing is rebound.
+- rev-2 F2: silent adopt only with a provable mapping.
+- rev-2 F3: opaque, doc-scoped random tokens.
+- rev-2 F4: malformed markers fail the save.
+- rev-2 F5: tokens are never renumbered; a new cell's token is inserted via
+  the editing API, so undo history survives.
+
+This was review round 2 of 2. Rev 3 has not had a reviewer pass of its own.
+The implementation PR's Codex round reviews it.
 
 Open question carried forward: keep stale outputs on edited cells (current
 choice, the same as Jupyter and VS Code) or clear them.
