@@ -1,4 +1,5 @@
 use super::App;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
@@ -176,7 +177,8 @@ fn rg_search_args(query: &str, paths: &[&Path], skip_notebooks: bool) -> Vec<OsS
         .collect();
     args.push("--smart-case".into());
     if skip_notebooks {
-        args.push("--glob".into());
+        // Case-insensitive, like the open path's `is_ipynb_path`.
+        args.push("--iglob".into());
         args.push("!*.ipynb".into());
     }
     args.push(query.into());
@@ -184,11 +186,12 @@ fn rg_search_args(query: &str, paths: &[&Path], skip_notebooks: bool) -> Vec<OsS
     args
 }
 
-/// Lists notebooks under `root` with the same ignore rules as the search.
+/// Lists notebooks under `root` with the same ignore rules as the search;
+/// `--iglob` so `X.IPYNB` counts, as it does when opened.
 fn rg_list_notebooks_args(root: &Path) -> Vec<OsString> {
     vec![
         "--files".into(),
-        "--glob".into(),
+        "--iglob".into(),
         "*.ipynb".into(),
         root.as_os_str().to_os_string(),
     ]
@@ -213,18 +216,22 @@ fn rg_stdin_args(query: &str) -> Vec<OsString> {
 }
 
 /// Blanks generated notebook marker lines while preserving every projected
-/// line number. Markers and their identity tokens are editor scaffolding, not
-/// cell text, so they must not produce project-search hits.
-fn notebook_search_text(projected: &str) -> String {
+/// line number, and returns their 1-based line numbers. Markers and their
+/// identity tokens are editor scaffolding, not cell text, so they must not
+/// produce project-search hits; the blank lines can still match patterns such
+/// as `^$`, so hits on the returned rows are dropped.
+fn notebook_search_text(projected: &str) -> (String, HashSet<usize>) {
     let mut searchable = String::with_capacity(projected.len());
-    for line in projected.split_inclusive('\n') {
+    let mut marker_rows = HashSet::new();
+    for (i, line) in projected.split_inclusive('\n').enumerate() {
         if line.starts_with("# %%") {
             searchable.push('\n');
+            marker_rows.insert(i + 1);
         } else {
             searchable.push_str(line);
         }
     }
-    searchable
+    (searchable, marker_rows)
 }
 
 /// Runs rg, feeding `stdin` from a separate thread so a large input cannot
@@ -327,7 +334,7 @@ fn run_project_search_capped(root: &Path, query: &str, cap: usize) -> io::Result
             failed.push(path);
             continue;
         };
-        let searchable = notebook_search_text(doc.projected_text());
+        let (searchable, marker_rows) = notebook_search_text(doc.projected_text());
         let errors_before = search.errors.len();
         let Some(stdout) = search.run(&stdin_args, Some(&searchable)) else {
             break;
@@ -339,9 +346,13 @@ fn run_project_search_capped(root: &Path, query: &str, cap: usize) -> io::Result
         }
         search.hits.extend(stdout.lines().filter_map(|l| {
             let (line, preview) = l.split_once(':')?;
+            let line: usize = line.parse().ok()?;
+            if marker_rows.contains(&line) {
+                return None;
+            }
             Some(ProjectSearchHit {
                 path: path.clone(),
-                line: line.parse().ok()?,
+                line,
                 preview: preview.to_string(),
             })
         }));
@@ -442,7 +453,7 @@ mod tests {
         assert_eq!(with_skip.len(), want.len() + 2);
         assert_eq!(
             with_skip[5..7],
-            [OsString::from("--glob"), "!*.ipynb".into()]
+            [OsString::from("--iglob"), "!*.ipynb".into()]
         );
     }
 
@@ -495,6 +506,51 @@ mod tests {
             "generated marker matched: {:?}",
             search.hits
         );
+    }
+
+    #[test]
+    fn notebook_search_with_empty_line_regex_skips_marker_rows() {
+        if !have_rg() {
+            return;
+        }
+        let tmp = tempdir().expect("tempdir");
+        fs::write(tmp.path().join("a.ipynb"), notebook_json()).expect("write");
+        let doc = notebook::project(notebook_json()).expect("project");
+        let lines: Vec<&str> = doc.projected_text().lines().collect();
+
+        let search = run_project_search(tmp.path(), "^$").expect("rg");
+
+        for hit in &search.hits {
+            assert!(
+                !lines[hit.line - 1].starts_with("# %%"),
+                "marker row matched: {:?}",
+                hit
+            );
+        }
+    }
+
+    #[test]
+    fn uppercase_notebook_extension_is_searched_as_a_notebook() {
+        if !have_rg() {
+            return;
+        }
+        let tmp = tempdir().expect("tempdir");
+        let lower = tmp.path().join("a.ipynb");
+        let upper = tmp.path().join("REPORT.IPYNB");
+        fs::write(&lower, notebook_json()).expect("write");
+        fs::write(&upper, notebook_json()).expect("write");
+
+        let search = run_project_search(tmp.path(), "needle").expect("rg");
+
+        let line = projected_line(notebook_json(), "needle_cell");
+        let got: Vec<_> = search
+            .hits
+            .iter()
+            .map(|h| (h.path.clone(), h.line))
+            .collect();
+        let mut want = vec![(lower, line), (upper, line)];
+        want.sort();
+        assert_eq!(got, want, "{:?}", search.hits);
     }
 
     #[test]
