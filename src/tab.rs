@@ -75,6 +75,9 @@ pub(crate) struct Tab {
     /// Set when this tab shows a projected notebook; None for raw text (incl. .ipynb fallback).
     #[allow(dead_code)] // TEMPORARY (skeleton): removed once open_file_as reads it.
     pub(crate) notebook: Option<NotebookDoc>,
+    /// The user accepted the notebook JSON reformat prompt for this tab; kept for the tab's lifetime.
+    #[allow(dead_code)] // Read by the notebook save path (rebuild wiring) once it lands.
+    pub(crate) reformat_confirmed: bool,
 }
 
 /// Syntax language of a tab's text: the notebook's kernel language for a

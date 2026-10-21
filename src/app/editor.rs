@@ -14,7 +14,7 @@ use crate::keybinds::{KeyAction, KeyScope};
 use crate::notebook::NotebookDoc;
 use crate::persistence::autosave_path_for;
 use crate::tab::{Tab, tab_syntax_lang};
-use crate::types::{EditorContextAction, Focus};
+use crate::types::{EditorContextAction, Focus, PendingAction, SaveOutcome};
 use crate::util::{
     compute_git_line_status, compute_tab_fold_ranges, editor_context_actions, inside,
     leading_indent_bytes, relative_path, text_to_lines, to_u16_saturating,
@@ -396,6 +396,7 @@ impl App {
             recovery_text: None,
             git_line_status,
             notebook,
+            reformat_confirmed: false,
         };
 
         // If opening as preview, replace existing preview tab
@@ -425,10 +426,13 @@ impl App {
         Ok(())
     }
 
-    pub(crate) fn save_file(&mut self) -> io::Result<()> {
+    /// Save the active tab. `Saved` means the buffer is on disk; `Deferred`
+    /// means a prompt now asks first; `Failed` (incl. "No file open") means
+    /// nothing was written. Callers close a tab only on `Saved`.
+    pub(crate) fn save_file(&mut self) -> io::Result<SaveOutcome> {
         let Some(tab) = self.active_tab_mut() else {
             self.set_status("No file open");
-            return Ok(());
+            return Ok(SaveOutcome::Failed);
         };
         let path = tab.path.clone();
         let mut content = tab.editor.lines().join("\n");
@@ -452,6 +456,21 @@ impl App {
             "Saved {}",
             relative_path(&self.root, &path).display()
         ));
+        Ok(SaveOutcome::Saved)
+    }
+
+    /// Save the active tab and close it only if the save completed. A
+    /// deferred save marks its reformat prompt to close after the answer `y`.
+    pub(crate) fn save_and_close_file(&mut self) -> io::Result<()> {
+        match self.save_file()? {
+            SaveOutcome::Saved => self.close_file(),
+            SaveOutcome::Deferred => {
+                if let PendingAction::NotebookReformat { then_close } = &mut self.pending {
+                    *then_close = true;
+                }
+            }
+            SaveOutcome::Failed => {}
+        }
         Ok(())
     }
 
@@ -1091,5 +1110,131 @@ mod tests {
         // Cursor should be clamped, not out of bounds
         let (row, _) = app.tabs[app.active_tab].editor.cursor();
         assert!(row < lines.len());
+    }
+
+    fn key(code: ratatui::crossterm::event::KeyCode) -> ratatui::crossterm::event::KeyEvent {
+        ratatui::crossterm::event::KeyEvent::new(
+            code,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        )
+    }
+
+    /// Open `a.txt` (on-disk "old") and type an unsaved edit into it.
+    fn dirty_app(root: &std::path::Path) -> (App, std::path::PathBuf) {
+        let file = root.join("a.txt");
+        fs::write(&file, "old\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file.clone()).expect("open");
+        let tab = &mut app.tabs[app.active_tab];
+        tab.editor.insert_str("new ");
+        tab.dirty = true;
+        (app, file)
+    }
+
+    #[test]
+    fn save_file_reports_outcome() {
+        let tmp = tempdir().expect("tempdir");
+        let mut app = new_app(tmp.path());
+        assert_eq!(app.save_file().expect("save"), SaveOutcome::Failed);
+        assert_eq!(app.status, "No file open");
+
+        let (mut app, file) = dirty_app(tmp.path());
+        assert_eq!(app.save_file().expect("save"), SaveOutcome::Saved);
+        assert_eq!(fs::read_to_string(&file).expect("read"), "new old\n");
+        assert!(!app.tabs[app.active_tab].dirty);
+    }
+
+    #[test]
+    fn close_prompt_enter_saves_then_closes() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, file) = dirty_app(tmp.path());
+        app.pending = PendingAction::ClosePrompt;
+        app.handle_pending_key(key(ratatui::crossterm::event::KeyCode::Enter))
+            .expect("enter");
+        assert_eq!(fs::read_to_string(&file).expect("read"), "new old\n");
+        assert!(app.tabs.is_empty());
+    }
+
+    #[test]
+    fn notebook_reformat_yes_saves_and_keeps_tab() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, file) = dirty_app(tmp.path());
+        app.pending = PendingAction::NotebookReformat { then_close: false };
+        app.handle_pending_key(key(ratatui::crossterm::event::KeyCode::Char('y')))
+            .expect("y");
+        assert!(matches!(app.pending, PendingAction::None));
+        assert_eq!(fs::read_to_string(&file).expect("read"), "new old\n");
+        assert_eq!(app.tabs.len(), 1);
+        assert!(!app.tabs[0].dirty);
+        assert!(app.tabs[0].reformat_confirmed);
+    }
+
+    #[test]
+    fn notebook_reformat_yes_with_then_close_saves_and_closes() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, file) = dirty_app(tmp.path());
+        app.pending = PendingAction::NotebookReformat { then_close: true };
+        app.handle_pending_key(key(ratatui::crossterm::event::KeyCode::Char('y')))
+            .expect("y");
+        assert!(matches!(app.pending, PendingAction::None));
+        assert_eq!(fs::read_to_string(&file).expect("read"), "new old\n");
+        assert!(app.tabs.is_empty());
+    }
+
+    #[test]
+    fn notebook_reformat_no_or_esc_keeps_tab_dirty() {
+        use ratatui::crossterm::event::KeyCode;
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            let tmp = tempdir().expect("tempdir");
+            let (mut app, file) = dirty_app(tmp.path());
+            app.pending = PendingAction::NotebookReformat { then_close: true };
+            app.handle_pending_key(key(code)).expect("answer");
+            assert!(matches!(app.pending, PendingAction::None));
+            assert_eq!(app.status, "Save canceled");
+            assert_eq!(fs::read_to_string(&file).expect("read"), "old\n");
+            assert_eq!(app.tabs.len(), 1);
+            assert!(app.tabs[0].dirty);
+            assert!(!app.tabs[0].reformat_confirmed);
+        }
+    }
+
+    #[test]
+    fn notebook_reformat_click_outside_cancels() {
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, file) = dirty_app(tmp.path());
+        app.pending = PendingAction::NotebookReformat { then_close: true };
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        })
+        .expect("click");
+        assert!(matches!(app.pending, PendingAction::None));
+        assert_eq!(app.status, "Save canceled");
+        assert_eq!(fs::read_to_string(&file).expect("read"), "old\n");
+        assert!(app.tabs[0].dirty);
+    }
+
+    #[test]
+    fn notebook_reformat_prompt_renders() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, _) = dirty_app(tmp.path());
+        app.pending = PendingAction::NotebookReformat { then_close: false };
+        let mut term = Terminal::new(TestBackend::new(140, 45)).expect("terminal");
+        term.draw(|f| crate::ui::draw(&mut app, f)).expect("draw");
+        let screen: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(screen.contains("Reformat Notebook"));
+        assert!(screen.contains("JSON whitespace"));
+        assert!(screen.contains("Y: Save"));
     }
 }

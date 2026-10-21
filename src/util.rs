@@ -37,6 +37,9 @@ pub(crate) fn pending_hint(pending: &PendingAction) -> String {
                 m
             )
         }
+        PendingAction::NotebookReformat { .. } => {
+            "Pending notebook reformat: Y save, N/Esc cancel".to_string()
+        }
         PendingAction::Delete(path) => format!(
             "Pending delete {}: Enter/Y confirm, Esc/N cancel",
             path.file_name()
@@ -1838,6 +1841,13 @@ mod utility_tests {
         assert!(!hint.is_empty());
         assert!(hint.contains("delete"));
         assert!(hint.contains("file.rs"));
+    }
+
+    #[test]
+    fn test_pending_hint_notebook_reformat() {
+        let hint = pending_hint(&PendingAction::NotebookReformat { then_close: true });
+        assert!(hint.contains("reformat"));
+        assert!(hint.contains("Y save"));
     }
 
     // command_action_label tests
