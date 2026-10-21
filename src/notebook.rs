@@ -2,7 +2,7 @@
 //! editor tab as percent-format cell text with opaque identity tokens, and
 //! saved back by splicing only changed cells into the original JSON.
 //!
-//! See `docs/plans/jupyter-notebooks.md` for the design. This module is pure:
+//! See `docs/notebooks-design.md` for the design. This module is pure:
 //! no `App` access, no filesystem access.
 //!
 //! JSON values are never re-serialized unless they changed: the root object

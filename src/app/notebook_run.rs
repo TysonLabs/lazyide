@@ -1,6 +1,6 @@
 //! Run notebook / Stop run: execute a whole notebook with
 //! `jupyter nbconvert --execute` in a child process, then apply the result.
-//! Design: `docs/plans/jupyter-notebooks.md` (*Run notebook*).
+//! Design: `docs/notebooks-design.md` (*Run notebook*).
 
 use std::fs;
 use std::io::{self, Read};
