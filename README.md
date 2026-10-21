@@ -87,7 +87,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Tabbed editing** — dedicated tab row, preview tabs, sticky tabs, dirty indicators
 - **Split panes** — two editor panes side by side or stacked, each with its own tab group; move tabs between them, drag the divider
 - **Minimap** — condensed file overview at the editor's right edge with the viewport highlighted; click or drag to scroll, `Alt+I` to toggle
-- **Status bar** — focus mode, git branch with +/- counts, file breadcrumbs, cursor position, diagnostic counts
+- **Status bar** — focus mode, git branch with +/- counts, file breadcrumbs, cursor position, diagnostic counts; on a notebook tab, the cursor's cell (see *Notebook commands*)
 - **File tree** — folders-first sorting, expand/collapse, context menus, resizable divider. A rename that switches an open tab between notebook view and plain text (adding `.ipynb` to a file, or removing it from a notebook shown as cells) reopens that tab; if the tab has unsaved changes, the rename is refused ("Save x.py before renaming"). An `.ipynb` file shown as raw JSON keeps its tab when renamed
 - **Command palette** — `Ctrl+P` for quick access to all actions
 - **Autosave & recovery** — buffers saved every 2s, crash recovery on reopen
@@ -115,6 +115,25 @@ import pandas as pd
 - **Changes on disk** — changes are checked by the watcher and again immediately before a notebook save, so a save cannot race ahead of watcher debounce. A tab without unsaved edits reloads. With unsaved edits, a change of outputs, metadata or execution counts only is adopted without a prompt ("Notebook outputs updated on disk") and the next save keeps both. When the change is the result just written by **Notebook: Run all**, the watcher keeps the run's completion status instead. Any other change asks: `R` loads the disk version, `K`/`D`/`Esc` keep your version, and the next save overwrites the notebook on disk.
 - **Autosave & recovery** — recovery re-attaches cell outputs only if the notebook file is unchanged since the autosave; otherwise the text is recovered as new cells, and the prompt says outputs will not be re-attached.
 - **Reopen as raw JSON** — the palette commands "Reopen as raw JSON" and "Reopen as notebook" switch the current tab between the cell view and the plain JSON text (to edit metadata by hand). Save first; a tab with unsaved changes is not reopened.
+- **Palette** — the notebook entries ("Notebook: …" and "Reopen as raw JSON") are listed only when the current tab is a notebook, and "Reopen as notebook" only on an `.ipynb` tab shown as raw JSON. "Notebook: Stop run" is also listed while a run is active. Other tabs show the usual palette.
+
+#### Notebook commands
+
+These work on a notebook shown as cells. On any other tab the keys do what they did before.
+
+| Command | Key | Palette entry |
+|---|---|---|
+| Next cell: the first line after the next marker | `Alt+Down` | Notebook: Next cell |
+| Previous cell: the top of the current cell, or of the cell above if already there | `Alt+Up` | Notebook: Previous cell |
+| Insert an empty code cell below the current cell | `Alt+C` | Notebook: Insert cell below |
+| Toggle the current cell between code and markdown (a raw cell becomes code) | — | Notebook: Toggle markdown/code |
+| Clear all outputs | — | Notebook: Clear all outputs |
+
+- Inserts and toggles are normal edits: `Ctrl+Z` undoes them (a toggle takes two undo steps). An inserted cell gets its token on save, like any new cell.
+- A toggled cell changes type, so it saves as a new cell and a code cell's outputs are dropped. A toggle is refused when a line would become a cell marker (for example the `%%time` magic).
+- **Clear all outputs** marks the tab dirty. On the next save every code cell gets `outputs: []` and `execution_count: null`; markdown and raw cells are unchanged. Reload the file to cancel. `Ctrl+Z` does not cancel it.
+- **Status bar:** the breadcrumbs end with the cursor's cell, numbered as on disk: `analysis.ipynb › cell 4/12 · [7] · text, image/png` (execution count and output types), `cell 5/12 · [8] · error: KeyError`, `cell 6/12 · edited, outputs stale` (the cell changed since it ran), or `new cell` (not saved yet, or its type changed). A status message shows first, as for any tab.
+- **macOS Terminal:** `Alt+Up`, `Alt+Down` and `Alt+C` need "Use Option as Meta key" (Settings > Profiles > Keyboard). Without it, use the palette entries. The keys can be remapped as `next_cell`, `prev_cell` and `insert_cell_below`.
 
 #### Run notebook
 
@@ -172,6 +191,8 @@ import pandas as pd
 | `Shift+Alt+Down` / `Up` | Duplicate line |
 | `F3` / `Shift+F3` | Find next / previous |
 | `Alt+N` / `Alt+P` | Next / previous git change |
+| `Alt+Down` / `Alt+Up` | Next / previous notebook cell (notebook tabs only) |
+| `Alt+C` | Insert notebook cell below (notebook tabs only) |
 | `PageUp` / `PageDown` | Scroll page |
 | `Ctrl+Home` / `Ctrl+End` | Start / end of file |
 

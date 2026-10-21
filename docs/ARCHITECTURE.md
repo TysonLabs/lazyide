@@ -19,11 +19,12 @@ src/
     search.rs          Find/replace in file, project search (ripgrep; notebooks searched by projected cell text)
     git_diff.rs        Diff view open/scroll/hunk keys, next/previous change jumps
     panes.rs           Two-pane split: swap-based focus, split/close/move, layout, divider drag
+    notebook_cmds.rs   Notebook commands: next/previous cell, insert cell, toggle code/markdown, clear outputs
     notebook_io.rs     Notebook tabs: save (rebuild + token insertion), watcher reload/adopt/conflict, autosave token sidecar, reopen as raw/notebook
     notebook_run.rs    Run notebook / Stop run: nbconvert child process, result classification
   ui/
     mod.rs             Main draw() function (layout, tree pane, tab row, editor pane)
-    status_bar.rs      Structured status bar (mode, branch, breadcrumbs, cursor, diagnostics)
+    status_bar.rs      Structured status bar (mode, branch, breadcrumbs + notebook cell summary, cursor, diagnostics)
     overlays.rs        Overlays: command palette, theme browser, help, prompts, etc.
     helpers.rs         UI utilities (centered_rect, label helpers, indent guides, horizontal span clipping)
   keybinds.rs          KeyAction enum, KeyBind, KeyBindings, JSON load/save
@@ -76,6 +77,8 @@ lib.rs: run_app()
 4. **Non-remappable keys** (Esc, Tab for focus switch, Delete in tree)
 5. **Focus-specific** — `Focus::Tree` -> `handle_tree_key()`, `Focus::Editor` -> `handle_editor_key()`
 
+The notebook keys (`KeyAction::is_notebook_only()`: next/previous cell, insert cell) run only on a notebook tab. On any other tab `handle_editor_key()` skips them and the key goes on to the textarea, as if unbound. They are last in `KeyAction::all()`, so a user binding on the same key wins the lookup.
+
 Every pending action has key handling in `handle_pending_key()` (`app/input_handlers.rs`) and a status hint in `util::pending_hint`. The modal ones (close prompt, delete, notebook reformat) also have a dialog in `ui/overlays.rs` and are mouse modals in `handle_mouse()` (a click outside cancels them). Quit is status-only: no dialog and no mouse modal.
 
 **Save flow.** `save_file()` returns `SaveOutcome`: `Saved` (the buffer is on disk), `Deferred` (nothing written yet; a prompt asks first) or `Failed` (nothing written, including "No file open"; the status says why). I/O errors stay `Err`. The Save key and the palette Save only save. The close prompt (Enter / Ctrl+S) goes through `save_and_close_file()`, which closes the tab only on `Saved`; on `Deferred` it sets `then_close` on the pending `NotebookReformat` prompt. That prompt asks before a save changes a notebook's JSON whitespace: `y` sets the tab's `reformat_confirmed` (kept for the tab's lifetime), saves, and closes only if `then_close` and the save returned `Saved`; `n` / Esc leaves the tab open and dirty.
@@ -90,6 +93,7 @@ Every pending action has key handling in `handle_pending_key()` (`app/input_hand
 - *Watcher*: change detection uses the raw-bytes digest (`doc.disk_digest()`), so our own save never reloads or conflicts. A pristine tab re-projects the disk; if the text is the same (only outputs/metadata changed) it keeps the buffer and its tokens. A dirty tab adopts an outputs-only change (`outputs_only_change` / `adopt_disk_outputs`), otherwise it raises the conflict prompt with the raw disk JSON in `conflict_disk_text`. An outputs-only result just written by **Notebook: Run all** keeps the run completion status instead of replacing it with the generic disk-update status. `R` re-projects it with fresh tokens; `K`/`D`/`Esc` keep the old doc as the save base and record the disk text in `open_disk_snapshot`, so that version does not prompt again and the next save overwrites it.
 - *Autosave*: next to `<autosave>` a notebook tab writes `<autosave>.nbtokens` (`{disk_digest, tokens}`), removed with the autosave. Recovery adopts those tokens when the digest matches the file; otherwise it runs `strip_tokens()` on the recovered text (all cells new) and sets `recovery_tokens_stale`, which the recovery prompt shows.
 - *Reopen*: the palette commands "Reopen as raw JSON" / "Reopen as notebook" switch a clean tab's mode in place.
+- *Palette*: `refresh_menu_results()` lists the notebook commands and "Reopen as raw JSON" only on a notebook tab, "Reopen as notebook" only on a raw tab with an `.ipynb` path (`notebook_io::is_ipynb_path`), and "Notebook: Stop run" also while a run is active. On any other tab the palette is the pre-notebook list.
 
 Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling through to `tui_textarea::Input` for basic text editing (arrow keys, typing characters, etc.).
 

@@ -8,9 +8,6 @@
 //! JSON values are never re-serialized unless they changed: the root object
 //! and each cell are parsed as ordered `(key, RawValue)` lists, and the writer
 //! emits the Jupyter layout (indent 1) around the raw values.
-//!
-//! Items not yet called by the App carry `#[allow(dead_code)]` until the
-//! slice that wires them (E: status bar, clear outputs) removes it.
 
 use std::collections::HashSet;
 use std::collections::hash_map::RandomState;
@@ -82,7 +79,6 @@ impl std::fmt::Display for NotebookSaveError {
 }
 
 /// One-line output summary for the status bar.
-#[allow(dead_code)] // Wired by slice E (status bar); remove then.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CellSummary {
     /// 0-based index of the cell in the notebook on disk.
@@ -148,7 +144,6 @@ pub(crate) struct NotebookDoc {
     clear_outputs: bool,
 }
 
-#[allow(dead_code)] // Status-bar/clear-outputs methods wired by slice E; remove then.
 impl NotebookDoc {
     /// The projected editor text (with tokens).
     pub(crate) fn projected_text(&self) -> &str {
@@ -166,6 +161,7 @@ impl NotebookDoc {
     pub(crate) fn layout_canonical(&self) -> bool {
         self.layout_canonical
     }
+    #[cfg(test)]
     pub(crate) fn cell_count(&self) -> usize {
         self.cells.len()
     }
@@ -187,8 +183,9 @@ impl NotebookDoc {
     }
     /// Projected visible text (without the marker line) of the cell that owns
     /// `token`, used to show "edited, outputs stale". The body lines exactly
-    /// as projected (markdown/raw with `# `), joined with `\n`, without the
-    /// blank separator line before the next marker.
+    /// as projected (markdown/raw with `# `), without the blank separator
+    /// line before the next marker. A final empty body line is represented by
+    /// a trailing `\n`, so this comparison distinguishes it from no body.
     pub(crate) fn cell_visible_text(&self, token: &str) -> Option<&str> {
         self.index_of(token).map(|i| self.cells[i].text.as_str())
     }
@@ -196,6 +193,7 @@ impl NotebookDoc {
     pub(crate) fn set_clear_outputs(&mut self, on: bool) {
         self.clear_outputs = on;
     }
+    #[cfg(test)]
     pub(crate) fn clear_outputs_pending(&self) -> bool {
         self.clear_outputs
     }
@@ -443,7 +441,7 @@ fn parse_cell(raw: &RawValue, i: usize, nbformat_minor: u64) -> Result<Cell, Not
     if cell.lines.iter().any(|l| is_marker_like(l)) {
         return Err(NotebookOpenError::MarkerCollision { cell_index: i });
     }
-    cell.text = cell.lines.join("\n");
+    cell.text = visible_cell_text(&cell.lines);
     if kind == CellKind::Code {
         let outputs = field(&fields, "outputs")
             .and_then(|o| serde_json::from_str::<Vec<Box<RawValue>>>(o.get()).ok())
@@ -542,7 +540,7 @@ fn unproject_line(kind: CellKind, line: &str) -> &str {
     }
 }
 
-fn marker_line(kind: CellKind, token: Option<&str>) -> String {
+pub(crate) fn marker_line(kind: CellKind, token: Option<&str>) -> String {
     let mut s = String::from("# %%");
     match kind {
         CellKind::Code => {}
@@ -875,6 +873,46 @@ fn is_token(t: &str) -> bool {
 /// True for any line that starts with `# %%` (valid marker or not).
 pub(crate) fn is_marker_like(line: &str) -> bool {
     line.starts_with("# %%")
+}
+
+/// The cell of buffer `lines` that holds `row`: its marker row (None above
+/// the first marker) and its last row (the line before the next marker, or
+/// the last line). Scans only that cell's lines.
+pub(crate) fn cell_rows(lines: &[String], row: usize) -> (Option<usize>, usize) {
+    if lines.is_empty() {
+        return (None, 0);
+    }
+    let row = row.min(lines.len().saturating_sub(1));
+    let marker = (0..=row).rev().find(|&r| is_marker_like(&lines[r]));
+    let end = (row + 1..lines.len())
+        .find(|&r| is_marker_like(&lines[r]))
+        .map_or(lines.len().saturating_sub(1), |next| next - 1);
+    (marker, end)
+}
+
+/// Body text of the buffer cell whose marker is at `marker` and whose last
+/// row is `end`, compared like [`NotebookDoc::cell_visible_text`]: the one
+/// trailing blank line (separator before the next marker, or the empty line
+/// after the buffer's final newline) is dropped, as `rebuild` does.
+pub(crate) fn buffer_cell_text(lines: &[String], marker: usize, end: usize) -> String {
+    let mut body = lines.get(marker + 1..=end).unwrap_or(&[]);
+    if let Some((last, rest)) = body.split_last()
+        && last.is_empty()
+    {
+        body = rest;
+    }
+    visible_cell_text(body)
+}
+
+/// Join body lines without losing a final empty line. Plain `join("\n")`
+/// maps both no lines and one empty line to the same string, even though
+/// `rebuild` treats those as different cell sources.
+fn visible_cell_text(lines: &[String]) -> String {
+    let mut text = lines.join("\n");
+    if lines.last().is_some_and(String::is_empty) {
+        text.push('\n');
+    }
+    text
 }
 
 /// Change-detection digest of raw file bytes (not a security hash).

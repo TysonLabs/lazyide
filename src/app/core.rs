@@ -1,4 +1,4 @@
-use super::notebook_io::write_nbtokens_sidecar;
+use super::notebook_io::{is_ipynb_path, write_nbtokens_sidecar};
 use super::{
     App, CompletionState, ContextMenuState, DiffViewState, KeybindEditorState, SearchResultsState,
     SplitDirection,
@@ -528,11 +528,22 @@ impl App {
             CommandAction::MoveTabToOtherPane,
             CommandAction::ClosePane,
             CommandAction::ToggleMinimap,
+            CommandAction::NotebookNextCell,
+            CommandAction::NotebookPrevCell,
+            CommandAction::NotebookInsertCellBelow,
+            CommandAction::NotebookToggleCellType,
+            CommandAction::NotebookClearOutputs,
             CommandAction::ReopenAsRawJson,
             CommandAction::ReopenAsNotebook,
             CommandAction::NotebookRunAll,
             CommandAction::NotebookStopRun,
         ];
+        // Notebook entries only where they apply, so a user who never opens a
+        // notebook sees the same palette as before notebooks existed.
+        let notebook_tab = self.active_tab().is_some_and(Tab::is_notebook);
+        let raw_ipynb_tab = self
+            .active_tab()
+            .is_some_and(|t| !t.is_notebook() && is_ipynb_path(&t.path));
         // Every whitespace-separated word must appear in the label, so
         // "split vert" finds "Split Editor Vertically".
         let words: Vec<String> = self
@@ -542,6 +553,19 @@ impl App {
             .collect();
         self.menu_results = all
             .into_iter()
+            .filter(|a| match a {
+                CommandAction::NotebookNextCell
+                | CommandAction::NotebookPrevCell
+                | CommandAction::NotebookInsertCellBelow
+                | CommandAction::NotebookToggleCellType
+                | CommandAction::NotebookClearOutputs
+                | CommandAction::NotebookRunAll
+                | CommandAction::ReopenAsRawJson => notebook_tab,
+                // A run outlives its tab, so Stop stays reachable while one runs.
+                CommandAction::NotebookStopRun => notebook_tab || !self.notebook_runs.is_empty(),
+                CommandAction::ReopenAsNotebook => raw_ipynb_tab,
+                _ => true,
+            })
             .filter(|a| {
                 let label = command_action_label(*a).to_ascii_lowercase();
                 words.iter().all(|w| label.contains(w.as_str()))
@@ -612,6 +636,11 @@ impl App {
             CommandAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
             CommandAction::ClosePane => self.close_pane(),
             CommandAction::ToggleMinimap => self.toggle_minimap(),
+            CommandAction::NotebookNextCell => self.notebook_next_cell(),
+            CommandAction::NotebookPrevCell => self.notebook_prev_cell(),
+            CommandAction::NotebookInsertCellBelow => self.notebook_insert_cell_below(),
+            CommandAction::NotebookToggleCellType => self.notebook_toggle_cell_type(),
+            CommandAction::NotebookClearOutputs => self.notebook_clear_outputs(),
             CommandAction::ReopenAsRawJson => self.reopen_active_tab(false)?,
             CommandAction::ReopenAsNotebook => self.reopen_active_tab(true)?,
             CommandAction::NotebookRunAll => self.run_notebook(),

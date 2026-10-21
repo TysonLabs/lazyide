@@ -32,6 +32,7 @@ The app is now modular (library + thin binary launcher):
   - `search.rs` (find/replace/project search)
   - `git_diff.rs` (diff view keys, next/previous change jumps)
   - `panes.rs` (two-pane split: focus swap, split/close/move tab, layout, divider drag)
+  - `notebook_cmds.rs` (notebook commands: cell navigation/insert, toggle code/markdown, clear outputs)
   - `lsp.rs` (LSP lifecycle, diagnostics, completion, definition handling)
   - `notebook_io.rs` (notebook tabs: save with token insertion, watcher reload/adopt/conflict, autosave token sidecar, reopen as raw/notebook)
   - `notebook_run.rs` (Run notebook / Stop run: `jupyter nbconvert` child process, polled in the event loop)
