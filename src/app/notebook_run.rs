@@ -173,17 +173,18 @@ impl App {
         }
     }
 
-    /// True (and forgets it) when `path` now holds exactly the file the last
-    /// run wrote: the watcher then leaves the run's status message alone.
+    /// True when `path` now holds exactly the file the last run wrote. Once
+    /// the watcher observes that path, forget the result even on a digest
+    /// mismatch: a later return to those bytes is an external change.
     pub(crate) fn take_run_result(&mut self, path: &Path, disk_digest: u64) -> bool {
-        let hit = self
+        let Some(idx) = self
             .last_run_result
-            .as_ref()
-            .is_some_and(|(p, d)| p == path && *d == disk_digest);
-        if hit {
-            self.last_run_result = None;
-        }
-        hit
+            .iter()
+            .position(|(result_path, _)| result_path == path)
+        else {
+            return false;
+        };
+        self.last_run_result.remove(idx).1 == disk_digest
     }
 
     fn finish_notebook_run(
@@ -238,7 +239,10 @@ impl App {
             let _ = fs::remove_file(&run.tmp);
             return format!("Run of {name} finished, but writing it failed: {e}");
         }
-        self.last_run_result = Some((run.path.clone(), digest(&result)));
+        self.last_run_result
+            .retain(|(result_path, _)| result_path != &run.path);
+        self.last_run_result
+            .push((run.path.clone(), digest(&result)));
         // Report from the written file's outputs, never from the exit code.
         let errors = std::str::from_utf8(&result)
             .ok()
@@ -464,6 +468,47 @@ mod tests {
         fs::write(&nb, errored).unwrap();
         app.reload_open_file_from_disk_if_pristine().unwrap();
         assert_eq!(app.status, "Notebook outputs updated on disk");
+    }
+
+    #[test]
+    fn external_output_before_run_result_is_seen_does_not_leave_stale_result() {
+        let (_t, mut app, nb) = setup(r#"cp executed.json "$7""#);
+        app.run_notebook();
+        wait_for_runs(&mut app);
+
+        // The watcher has not seen the run's bytes yet. A different external
+        // outputs-only write must consume that pending run result.
+        let errored = fs::read_to_string(nb.with_file_name("errored.json")).unwrap();
+        fs::write(&nb, errored).unwrap();
+        app.reload_open_file_from_disk_if_pristine().unwrap();
+        assert_eq!(app.status, "Notebook outputs updated on disk");
+
+        // Returning to the old run bytes is another external write, not the
+        // delayed watcher event for the run, so it must also be reported.
+        app.set_status("intervening status");
+        fs::write(&nb, EXECUTED_NB).unwrap();
+        app.reload_open_file_from_disk_if_pristine().unwrap();
+        assert_eq!(app.status, "Notebook outputs updated on disk");
+    }
+
+    #[test]
+    fn delayed_result_from_another_notebook_does_not_replace_latest_run_status() {
+        let (_t, mut app, nb) = setup(r#"cp executed.json "$7""#);
+        let other = nb.with_file_name("other.ipynb");
+        fs::write(&other, SOURCE_NB).unwrap();
+
+        app.run_notebook();
+        wait_for_runs(&mut app);
+        app.open_file(other).unwrap();
+        app.run_notebook();
+        wait_for_runs(&mut app);
+        let latest_status = app.status.clone();
+
+        // The first run's watcher event can be delivered after the second run
+        // has supplied the status currently shown in the UI.
+        app.switch_to_tab(0);
+        app.reload_open_file_from_disk_if_pristine().unwrap();
+        assert_eq!(app.status, latest_status);
     }
 
     #[test]
