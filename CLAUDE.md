@@ -15,7 +15,7 @@ cargo run              # Run the application
 cargo run -- <path>    # Open a specific project directory
 ```
 
-Rust 2024 edition. No custom build scripts, no CI/CD.
+Rust 2024 edition. No custom build scripts. CI (`.github/workflows/ci.yml`) runs `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`.
 
 ## Architecture
 

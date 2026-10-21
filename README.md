@@ -262,6 +262,7 @@ Requires Rust 2024 edition.
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — module structure, data flow, rendering pipeline
+- [Notebook design](docs/notebooks-design.md) — how `.ipynb` files are projected, saved and kept safe
 - [Contributing](CONTRIBUTING.md) — themes, bug reports, code contributions
 
 ## Acknowledgements

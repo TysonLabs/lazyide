@@ -1,7 +1,7 @@
-# Plan: Jupyter notebook (`.ipynb`) editing
+# Design: Jupyter notebook (`.ipynb`) editing
 
-Status: revised after Codex plan review and confirmation round (rev 4: notebook commands + run) · Branch: `feat/jupyter-notebooks` ·
-Issue: [#51](https://github.com/TysonLabs/lazyide/issues/51)
+Status: implemented (plan rev 4; shipped via PRs #52, #53, #55-#60). Kept as the design record;
+the README "Notebooks" section is the user guide. Issue: [#51](https://github.com/TysonLabs/lazyide/issues/51)
 
 ## Goal
 
