@@ -30,6 +30,7 @@ mod git_diff;
 mod input;
 mod input_handlers;
 mod lsp;
+mod notebook_io;
 mod panes;
 mod search;
 

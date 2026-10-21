@@ -736,14 +736,18 @@ pub(crate) fn render_conflict_prompt(app: &mut App, frame: &mut Frame<'_>) {
 pub(crate) fn render_recovery_prompt(app: &mut App, frame: &mut Frame<'_>) {
     let theme = app.active_theme();
     let area = centered_rect(62, 28, frame.area());
-    let text = [
-        "Autosave content found for this file.",
+    let stale = app.active_tab().is_some_and(|t| t.recovery_tokens_stale);
+    let mut text = vec!["Autosave content found for this file."];
+    if stale {
+        text.push("The notebook changed since then: outputs will not be re-attached.");
+    }
+    text.extend([
         "",
         "Enter or R: Recover autosave",
         "D: Discard autosave",
         "Esc or C: Cancel",
-    ]
-    .join("\n");
+    ]);
+    let text = text.join("\n");
     render_dialog(area, "Recover Autosave", text, theme, frame);
 }
 

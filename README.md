@@ -92,6 +92,30 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Command palette** — `Ctrl+P` for quick access to all actions
 - **Autosave & recovery** — buffers saved every 2s, crash recovery on reopen
 
+### Notebooks
+
+A Jupyter notebook (`.ipynb`, nbformat 4) opens as readable cell text in a normal tab, in the jupytext "percent" format:
+
+```
+# %% #k3x9qa
+import pandas as pd
+
+# %% [markdown] #p0d7mz
+# # Title
+# Some *markdown* text.
+```
+
+- **Cells** — each cell starts with a `# %%` marker line (`# %% [markdown]`, `# %% [raw]`). Markdown and raw lines carry a `# ` prefix. Type a new `# %%` line to add a cell, delete a cell's lines to remove it. Text above the first marker becomes a code cell (it gets a marker line on save).
+- **Cell tokens** — the `#k3x9qa` at the end of a marker is the cell's identity for this tab. It is not saved to the file. Keep it when you edit or move a cell, so the cell keeps its outputs. A cell without a token (or with a token from another notebook, or whose type changed) saves as a new cell. On save, new cells get a token on their marker line; this is one extra undo step.
+- **What is kept** — saving writes back only the cells you changed. Every other byte stays as it was: cell ids, metadata, outputs, execution counts, number formatting and key order. A save with no edits does not rewrite the file. An edited cell keeps its (now stale) outputs, as in Jupyter.
+- **Edited cells are normalized** — a changed cell's source is written with LF line endings, in the list form (unless the cell was a single string), with no trailing newline unless the last line is blank.
+- **Malformed markers** — a line that starts with `# %%` but is not a valid marker (for example a half-typed `# %% #`) makes the save fail with "Malformed cell marker at line N"; nothing is written.
+- **Reformat prompt** — if the file's JSON whitespace is not Jupyter's own layout (for example indent 2), the first save that changes it asks first. Cell contents and outputs are kept either way.
+- **Fallback** — a file that is not a valid nbformat 4 notebook (or whose cell text contains a `# %%` line) opens as raw JSON, with the reason in the status bar ("Opened x.ipynb as raw JSON: …").
+- **Changes on disk** — when the notebook changes on disk (for example after `jupyter nbconvert --execute`), a tab without unsaved edits reloads. With unsaved edits, a change of outputs, metadata or execution counts only is adopted silently ("Notebook outputs updated on disk") and the next save keeps both. Any other change asks: `R` loads the disk version, `K`/`D`/`Esc` keep your version, and the next save overwrites the notebook on disk.
+- **Autosave & recovery** — recovery re-attaches cell outputs only if the notebook file is unchanged since the autosave; otherwise the text is recovered as new cells, and the prompt says outputs will not be re-attached.
+- **Reopen as raw JSON** — the palette commands "Reopen as raw JSON" and "Reopen as notebook" switch the current tab between the cell view and the plain JSON text (to edit metadata by hand). Save first; a tab with unsaved changes is not reopened.
+
 ## Keyboard
 
 <details>
