@@ -200,6 +200,9 @@ pub(crate) struct App {
     pub(crate) git_thread_handle: Option<JoinHandle<()>>,
     pub(crate) cached_file_list: Vec<PathBuf>,
     pub(crate) notebook_runs: Vec<notebook_run::NotebookRun>,
+    /// (path, digest) pairs that successful runs wrote but the watcher has not
+    /// observed yet, so picking up those outputs keeps the run status message.
+    pub(crate) last_run_result: Vec<(PathBuf, u64)>,
     /// Program and leading args for Run notebook (`["jupyter"]`); a seam so
     /// tests run a fake script instead of Jupyter.
     pub(crate) jupyter_cmd: Vec<String>,
