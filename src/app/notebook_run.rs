@@ -529,6 +529,65 @@ mod tests {
         assert_eq!(app.status, latest_status);
     }
 
+    /// The run finishes while another tab is active and the watcher pass
+    /// reconciles only that tab; activating the notebook tab applies it.
+    fn assert_notebook_tab_took_run_result(app: &App, before: &str) {
+        let tab = app.active_tab().unwrap();
+        assert!(tab.is_notebook());
+        assert!(!tab.dirty);
+        assert_eq!(tab.editor.lines().join("\n"), before);
+        let doc = tab.notebook.as_ref().unwrap();
+        assert_eq!(doc.disk_digest(), digest(EXECUTED_NB.as_bytes()));
+        assert_eq!(
+            doc.cell_summary(&doc.tokens()[0]).unwrap().execution_count,
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn run_finished_on_inactive_tab_reconciles_on_switch_back() {
+        let (_t, mut app, nb) = setup(r#"cp executed.json "$7""#);
+        let before = app.tabs[0].editor.lines().join("\n");
+        let plain = nb.with_file_name("plain.txt");
+        fs::write(&plain, "x\n").unwrap();
+        app.run_notebook();
+        app.open_file(plain).unwrap();
+        wait_for_runs(&mut app);
+        app.reload_open_file_from_disk_if_pristine().unwrap();
+        assert_ne!(
+            app.tabs[0].notebook.as_ref().unwrap().disk_digest(),
+            digest(EXECUTED_NB.as_bytes())
+        );
+        app.switch_to_tab(0);
+        assert_notebook_tab_took_run_result(&app, &before);
+        assert!(app.status.starts_with("Run finished in "), "{}", app.status);
+    }
+
+    #[test]
+    fn run_finished_in_unfocused_pane_reconciles_on_focus() {
+        let (_t, mut app, _nb) = setup(r#"cp executed.json "$7""#);
+        let before = app.tabs[0].editor.lines().join("\n");
+        app.run_notebook();
+        app.split_pane(crate::app::SplitDirection::Vertical);
+        app.focus_other_pane();
+        wait_for_runs(&mut app);
+        app.focus_other_pane();
+        assert_notebook_tab_took_run_result(&app, &before);
+    }
+
+    #[test]
+    fn run_finished_on_inactive_tab_reconciles_when_other_tab_closes() {
+        let (_t, mut app, nb) = setup(r#"cp executed.json "$7""#);
+        let before = app.tabs[0].editor.lines().join("\n");
+        let plain = nb.with_file_name("plain.txt");
+        fs::write(&plain, "x\n").unwrap();
+        app.run_notebook();
+        app.open_file(plain).unwrap();
+        wait_for_runs(&mut app);
+        app.close_file();
+        assert_notebook_tab_took_run_result(&app, &before);
+    }
+
     #[test]
     fn run_status_reports_error_cell_from_written_file() {
         let (_t, mut app, nb) = setup(r#"cp errored.json "$7""#);
@@ -605,7 +664,10 @@ cp executed.json "$7""#,
         assert_eq!(fs::read_to_string(&first).unwrap(), "first result");
         let second = nb.with_file_name("nb.executed-2.ipynb");
         assert_eq!(fs::read_to_string(second).unwrap(), EXECUTED_NB);
-        assert_eq!(unused_executed_path(&nb), nb.with_file_name("nb.executed-3.ipynb"));
+        assert_eq!(
+            unused_executed_path(&nb),
+            nb.with_file_name("nb.executed-3.ipynb")
+        );
     }
 
     #[test]

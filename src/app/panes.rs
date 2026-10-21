@@ -48,6 +48,7 @@ impl App {
         self.gutter_drag_anchor = None;
         self.minimap_dragging = false;
         self.focus = Focus::Editor;
+        self.reconcile_activated_notebook();
         let name = self
             .open_path()
             .map(|p| relative_path(&self.root, p).display().to_string())
@@ -103,6 +104,7 @@ impl App {
             tab.visible_rows_map.clear();
         }
         self.set_status("Pane closed");
+        self.reconcile_activated_notebook();
     }
 
     /// Move the active tab into the other pane and focus it there.

@@ -399,6 +399,7 @@ impl App {
             self.active_tab = idx;
             self.completion.reset();
             self.focus = Focus::Editor;
+            self.reconcile_activated_notebook();
         }
     }
 

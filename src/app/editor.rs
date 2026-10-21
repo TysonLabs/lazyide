@@ -531,10 +531,13 @@ impl App {
             self.focus = Focus::Tree;
             self.completion.reset();
             self.set_status("Closed file");
-        } else if self.active_tab >= self.tabs.len() {
-            self.active_tab = self.tabs.len() - 1;
-        } else if self.active_tab > idx {
-            self.active_tab -= 1;
+        } else {
+            if self.active_tab >= self.tabs.len() {
+                self.active_tab = self.tabs.len() - 1;
+            } else if self.active_tab > idx {
+                self.active_tab -= 1;
+            }
+            self.reconcile_activated_notebook();
         }
     }
     pub(crate) fn handle_help_key(&mut self, key: KeyEvent) -> io::Result<()> {

@@ -244,6 +244,23 @@ impl App {
         Ok(())
     }
 
+    /// A notebook tab that just became active: the watcher reconciles only
+    /// the active tab, so a change made while it was inactive (e.g. a run
+    /// that finished meanwhile) is applied now. No-op on raw tabs.
+    pub(crate) fn reconcile_activated_notebook(&mut self) {
+        if !self.active_tab().is_some_and(|t| t.is_notebook()) {
+            return;
+        }
+        let result = if self.is_dirty() {
+            self.maybe_flag_external_conflict()
+        } else {
+            self.reload_open_file_from_disk_if_pristine()
+        };
+        if let Err(e) = result {
+            self.set_status(format!("Could not check notebook on disk: {e}"));
+        }
+    }
+
     /// Dirty notebook tab whose file changed: adopt the disk outputs when
     /// the cell mapping is provable, otherwise raise the conflict prompt.
     /// `conflict_disk_text` holds the raw disk JSON for `R`.
