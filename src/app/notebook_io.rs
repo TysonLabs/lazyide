@@ -391,12 +391,22 @@ impl App {
         tab.dirty = false;
         tab.open_disk_snapshot = Some(text);
         tab.git_line_status = git_line_status;
+        // An autosave declined because it was written in the other view was
+        // never offered; now that the view changed it may match, so reset the
+        // per-view flags and offer it. An autosave the user already saw and
+        // canceled is not offered again.
+        let recheck = tab.keep_autosave;
+        tab.keep_autosave = false;
+        tab.recovery_tokens_stale = false;
         self.notify_lsp_did_change();
         self.set_status(if as_notebook {
             format!("Reopened {rel} as notebook")
         } else {
             format!("Reopened {rel} as raw JSON")
         });
+        if recheck {
+            self.check_recovery_for_open_file();
+        }
         Ok(())
     }
 }
@@ -893,7 +903,8 @@ mod tests {
         fs::write(&path, V44).expect("write");
         let autosave = autosave_path_for(&path);
         fs::create_dir_all(autosave.parent().expect("parent")).expect("mkdir");
-        let raw = V44.replace("\"x = 1\"", "\"x = 9\"");
+        let raw = V44.replace("\"x = 1\\n\"", "\"x = 9\\n\"");
+        assert_ne!(raw, V44);
         fs::write(&autosave, &raw).expect("autosave");
         let mut app = App::new(tmp.path().to_path_buf()).expect("app");
         app.open_file(path.clone()).expect("open");
@@ -916,6 +927,31 @@ mod tests {
         assert_eq!(app.save_file().expect("save"), SaveOutcome::Saved);
         app.close_file();
         assert_eq!(fs::read_to_string(&autosave).expect("kept"), raw);
+        cleanup_autosave(&path);
+    }
+
+    /// Upgrade case, continued: reopening the notebook tab as raw JSON makes
+    /// the declined raw autosave match the view, so it is offered again and
+    /// the tab autosaves normally.
+    #[test]
+    fn reopen_as_raw_offers_declined_raw_autosave() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("a.ipynb");
+        fs::write(&path, V44).expect("write");
+        let autosave = autosave_path_for(&path);
+        fs::create_dir_all(autosave.parent().expect("parent")).expect("mkdir");
+        let raw = V44.replace("\"x = 1\\n\"", "\"x = 9\\n\"");
+        assert_ne!(raw, V44);
+        fs::write(&autosave, &raw).expect("autosave");
+        let mut app = App::new(tmp.path().to_path_buf()).expect("app");
+        app.open_file(path.clone()).expect("open");
+        assert!(app.tabs[0].keep_autosave);
+        app.reopen_active_tab(false).expect("reopen");
+        let tab = &app.tabs[0];
+        assert!(!tab.is_notebook());
+        assert!(!tab.keep_autosave);
+        assert!(tab.recovery_prompt_open);
+        assert_eq!(tab.recovery_text.as_deref(), Some(raw.as_str()));
         cleanup_autosave(&path);
     }
 
