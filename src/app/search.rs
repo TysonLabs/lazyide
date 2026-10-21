@@ -420,17 +420,6 @@ mod tests {
             + 1
     }
 
-    /// Slice-D test helper until the real notebook open path lands: open the
-    /// file, then make the tab a projected notebook tab.
-    fn open_notebook_for_search_test(app: &mut App, path: &Path) {
-        app.open_file(path.to_path_buf()).expect("open");
-        let doc = notebook::project(&fs::read_to_string(path).expect("read")).expect("project");
-        let lines: Vec<String> = doc.projected_text().lines().map(String::from).collect();
-        let idx = app.active_tab;
-        app.tabs[idx].notebook = Some(doc);
-        app.replace_editor_text(lines, (0, 0));
-    }
-
     /// Guardrail 5: with no notebooks the search command is exactly the
     /// pre-notebook one.
     #[test]
@@ -533,7 +522,7 @@ mod tests {
         let nb = tmp.path().join("a.ipynb");
         fs::write(&nb, notebook_json()).expect("write");
         let mut app = new_app(tmp.path());
-        open_notebook_for_search_test(&mut app, &nb);
+        app.open_file(nb.clone()).expect("open");
 
         app.search_in_project("needle_cell");
         app.open_selected_search_result().expect("jump");

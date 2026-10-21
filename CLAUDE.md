@@ -33,6 +33,7 @@ The app is now modular (library + thin binary launcher):
   - `git_diff.rs` (diff view keys, next/previous change jumps)
   - `panes.rs` (two-pane split: focus swap, split/close/move tab, layout, divider drag)
   - `lsp.rs` (LSP lifecycle, diagnostics, completion, definition handling)
+  - `notebook_io.rs` (notebook tabs: save with token insertion, watcher reload/adopt/conflict, autosave token sidecar, reopen as raw/notebook)
   - `notebook_run.rs` (Run notebook / Stop run: `jupyter nbconvert` child process, polled in the event loop)
 - `src/ui/mod.rs` + `src/ui/overlays.rs` + `src/ui/helpers.rs` — drawing and overlays
 - Shared domain/util modules:

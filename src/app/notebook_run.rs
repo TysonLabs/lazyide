@@ -267,7 +267,6 @@ impl App {
 mod tests {
     use super::*;
     use crate::types::PromptMode;
-    use crate::util::text_to_lines;
     use std::thread::sleep;
     use tempfile::tempdir;
 
@@ -321,18 +320,6 @@ mod tests {
 }
 "#;
 
-    /// Test-only notebook open for slice F; replaced by the real open path
-    /// when slice B lands.
-    fn open_notebook_for_test_run(app: &mut App, path: &Path) {
-        app.open_file(path.to_path_buf()).unwrap();
-        let doc = project(&fs::read_to_string(path).unwrap()).unwrap();
-        let lines = text_to_lines(doc.projected_text());
-        app.replace_editor_text(lines, (0, 0));
-        let tab = app.active_tab_mut().unwrap();
-        tab.notebook = Some(doc);
-        tab.dirty = false;
-    }
-
     /// A temp project with `nb.ipynb` open as a notebook, a fake `jupyter`
     /// script with `body` (args: `$7` = tmp name, `$8` = notebook name, both
     /// relative to the cwd), and `executed.json` / `errored.json` to copy.
@@ -354,7 +341,8 @@ mod tests {
         fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
         let mut app = App::new(root.clone()).unwrap();
         app.jupyter_cmd = vec!["sh".to_string(), script.display().to_string()];
-        open_notebook_for_test_run(&mut app, &nb);
+        app.open_file(nb.clone()).unwrap();
+        assert!(app.tabs[0].is_notebook());
         (tmp, app, nb)
     }
 
@@ -413,6 +401,25 @@ mod tests {
         let doc = project(EXECUTED_NB).unwrap();
         let token = &doc.tokens()[0];
         assert_eq!(doc.cell_summary(token).unwrap().execution_count, Some(1));
+    }
+
+    /// The run result reaches the open pristine tab through the watcher
+    /// rules: the doc takes the new bytes, the buffer and tokens stay.
+    #[test]
+    fn run_success_reloads_pristine_tab_through_watcher() {
+        let (_t, mut app, _nb) = setup(r#"cp executed.json "$7""#);
+        let before = app.tabs[0].editor.lines().join("\n");
+        app.run_command_action(crate::types::CommandAction::NotebookRunAll)
+            .unwrap();
+        wait_for_runs(&mut app);
+        app.reload_open_file_from_disk_if_pristine().unwrap();
+        let tab = &app.tabs[0];
+        assert!(tab.is_notebook());
+        assert!(!tab.dirty);
+        assert_eq!(tab.editor.lines().join("\n"), before);
+        let doc = tab.notebook.as_ref().unwrap();
+        assert_eq!(doc.disk_digest(), digest(EXECUTED_NB.as_bytes()));
+        assert_eq!(app.status, "Notebook outputs updated on disk");
     }
 
     #[test]

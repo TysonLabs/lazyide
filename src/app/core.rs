@@ -1,3 +1,4 @@
+use super::notebook_io::write_nbtokens_sidecar;
 use super::{
     App, CompletionState, ContextMenuState, DiffViewState, KeybindEditorState, SearchResultsState,
     SplitDirection,
@@ -19,7 +20,8 @@ use ratatui::layout::Rect;
 use crate::keybinds::{KeyAction, load_keybindings};
 use crate::lsp_client::resolve_rust_analyzer_bin;
 use crate::persistence::{
-    PersistedState, autosave_path_for, load_persisted_state, save_persisted_state,
+    PersistedState, autosave_path_for, load_persisted_state, nbtokens_path_for,
+    save_persisted_state,
 };
 use crate::syntax::SyntaxLang;
 use crate::tab::{FoldRange, Tab};
@@ -327,6 +329,9 @@ impl App {
         if self.is_dirty() || !path.exists() {
             return Ok(());
         }
+        if self.tabs[self.active_tab].is_notebook() {
+            return self.reload_pristine_notebook(&path);
+        }
         let bytes = fs::read(&path)?;
         let disk_text = String::from_utf8_lossy(&bytes).to_string();
         let current_text = self.tabs[self.active_tab].editor.lines().join("\n");
@@ -522,6 +527,8 @@ impl App {
             CommandAction::MoveTabToOtherPane,
             CommandAction::ClosePane,
             CommandAction::ToggleMinimap,
+            CommandAction::ReopenAsRawJson,
+            CommandAction::ReopenAsNotebook,
             CommandAction::NotebookRunAll,
             CommandAction::NotebookStopRun,
         ];
@@ -604,6 +611,8 @@ impl App {
             CommandAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
             CommandAction::ClosePane => self.close_pane(),
             CommandAction::ToggleMinimap => self.toggle_minimap(),
+            CommandAction::ReopenAsRawJson => self.reopen_active_tab(false)?,
+            CommandAction::ReopenAsNotebook => self.reopen_active_tab(true)?,
             CommandAction::NotebookRunAll => self.run_notebook(),
             CommandAction::NotebookStopRun => self.stop_notebook_run(),
         }
@@ -635,6 +644,9 @@ impl App {
                 fs::create_dir_all(parent)?;
             }
             fs::write(&autosave, tab.editor.lines().join("\n"))?;
+            if let Some(doc) = &tab.notebook {
+                write_nbtokens_sidecar(&tab.path, doc)?;
+            }
         }
         self.autosave_last_write = Instant::now();
         Ok(())
@@ -646,9 +658,12 @@ impl App {
         };
         let path = tab.path.clone();
         let autosave = autosave_path_for(&path);
-        let Ok(recovered) = fs::read_to_string(autosave) else {
+        let Ok(mut recovered) = fs::read_to_string(autosave) else {
             return;
         };
+        if self.tabs[self.active_tab].is_notebook() {
+            recovered = self.recover_notebook_tokens(recovered);
+        }
         let current = self.tabs[self.active_tab].editor.lines().join("\n");
         if recovered != current
             && let Some(tab) = self.active_tab_mut()
@@ -661,6 +676,7 @@ impl App {
     pub(crate) fn clear_autosave_for_open_file(&mut self) {
         if let Some(tab) = self.active_tab() {
             let _ = fs::remove_file(autosave_path_for(&tab.path));
+            let _ = fs::remove_file(nbtokens_path_for(&tab.path));
         }
     }
 
@@ -672,6 +688,9 @@ impl App {
             return Ok(());
         }
         let path = tab.path.clone();
+        if tab.is_notebook() {
+            return self.flag_notebook_conflict(&path);
+        }
         let disk = fs::read_to_string(&path)?;
         let current = self.tabs[self.active_tab].editor.lines().join("\n");
         let snapshot = self.tabs[self.active_tab]

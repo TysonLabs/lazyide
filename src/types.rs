@@ -14,7 +14,6 @@ pub(crate) enum PendingAction {
     Delete(PathBuf),
     /// Saving a notebook would change its JSON whitespace; ask first.
     /// `then_close` closes the tab after a confirmed save.
-    #[allow(dead_code)] // TEMPORARY: constructed by the notebook save path once it lands.
     NotebookReformat {
         then_close: bool,
     },
@@ -26,7 +25,6 @@ pub(crate) enum SaveOutcome {
     /// The buffer was written to disk.
     Saved,
     /// Nothing was written yet; a prompt (`PendingAction::NotebookReformat`) asks first.
-    #[allow(dead_code)] // TEMPORARY: returned by the notebook save path once it lands.
     Deferred,
     /// Nothing was written (no file open, or the buffer could not be saved); the status says why.
     Failed,
@@ -66,6 +64,8 @@ pub(crate) enum CommandAction {
     MoveTabToOtherPane,
     ClosePane,
     ToggleMinimap,
+    ReopenAsRawJson,
+    ReopenAsNotebook,
     NotebookRunAll,
     NotebookStopRun,
 }

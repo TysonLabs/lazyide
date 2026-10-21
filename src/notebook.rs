@@ -9,8 +9,8 @@
 //! and each cell are parsed as ordered `(key, RawValue)` lists, and the writer
 //! emits the Jupyter layout (indent 1) around the raw values.
 //!
-//! The public items carry `#[allow(dead_code)]` until the App wiring slices
-//! (B/E) call them; those slices remove the attributes.
+//! Items not yet called by the App carry `#[allow(dead_code)]` until the
+//! slice that wires them (E: status bar, clear outputs) removes it.
 
 use std::collections::HashSet;
 use std::collections::hash_map::RandomState;
@@ -43,7 +43,6 @@ pub(crate) struct Marker {
 
 /// Why a file could not be projected; the caller opens it as raw JSON and
 /// shows `Opened x.ipynb as raw JSON: <reason>`.
-#[allow(dead_code)] // Wired by slice B (open_file_as); remove then.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NotebookOpenError {
     InvalidJson(String),
@@ -99,7 +98,6 @@ pub(crate) struct CellSummary {
 
 /// Result of [`rebuild`]: the bytes to write and the tokens to append to the
 /// marker lines of new (tokenless) cells.
-#[allow(dead_code)] // Wired by slice B (save_file); remove then.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Rebuilt {
     pub(crate) bytes: String,
@@ -150,7 +148,7 @@ pub(crate) struct NotebookDoc {
     clear_outputs: bool,
 }
 
-#[allow(dead_code)] // Wired by slices B/E; remove when App calls these.
+#[allow(dead_code)] // Status-bar/clear-outputs methods wired by slice E; remove then.
 impl NotebookDoc {
     /// The projected editor text (with tokens).
     pub(crate) fn projected_text(&self) -> &str {
@@ -349,7 +347,6 @@ fn is_object(raw: &RawValue) -> bool {
 }
 
 /// Parse notebook bytes into a doc, or say why it must open as raw JSON.
-#[allow(dead_code)] // Wired by slice B (open_file_as); remove then.
 pub(crate) fn project(text: &str) -> Result<NotebookDoc, NotebookOpenError> {
     let root_raw = serde_json::from_str::<Box<RawValue>>(text)
         .map_err(|e| NotebookOpenError::InvalidJson(e.to_string()))?;
@@ -711,7 +708,6 @@ fn parse_buffer(text: &str) -> Result<Vec<BufCell<'_>>, NotebookSaveError> {
 }
 
 /// Build the bytes to write from the edited buffer text.
-#[allow(dead_code)] // Wired by slice B (save_file); remove then.
 pub(crate) fn rebuild(doc: &NotebookDoc, edited: &str) -> Result<Rebuilt, NotebookSaveError> {
     let buf = parse_buffer(edited)?;
     // Identity: the first occurrence of a known token with the same type.
@@ -831,7 +827,6 @@ fn new_cell_fields(nbformat_minor: u64, c: &BufCell, ids: &mut HashSet<String>) 
 }
 
 /// Remove identity tokens from every marker line (stale recovery text).
-#[allow(dead_code)] // Wired by slice B (recovery); remove then.
 pub(crate) fn strip_tokens(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for piece in text.split_inclusive('\n') {
