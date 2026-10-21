@@ -66,6 +66,8 @@ pub(crate) enum CommandAction {
     MoveTabToOtherPane,
     ClosePane,
     ToggleMinimap,
+    NotebookRunAll,
+    NotebookStopRun,
 }
 
 #[derive(Debug, Clone)]
