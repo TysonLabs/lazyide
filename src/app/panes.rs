@@ -48,12 +48,13 @@ impl App {
         self.gutter_drag_anchor = None;
         self.minimap_dragging = false;
         self.focus = Focus::Editor;
-        self.reconcile_activated_notebook();
         let name = self
             .open_path()
             .map(|p| relative_path(&self.root, p).display().to_string())
             .unwrap_or_else(|| "empty pane".to_string());
         self.set_status(format!("Focus: {name}"));
+        // After the focus status, so a reload or error status stays visible.
+        self.reconcile_activated_notebook();
     }
 
     pub(crate) fn split_pane(&mut self, direction: SplitDirection) {

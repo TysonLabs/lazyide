@@ -409,6 +409,7 @@ impl App {
             notebook,
             reformat_confirmed: false,
             recovery_tokens_stale: false,
+            keep_autosave: false,
         };
 
         // If opening as preview, replace existing preview tab
@@ -522,9 +523,11 @@ impl App {
                 }),
             );
         }
-        // Clear autosave
-        let _ = fs::remove_file(autosave_path_for(&self.tabs[idx].path));
-        let _ = fs::remove_file(nbtokens_path_for(&self.tabs[idx].path));
+        // Clear autosave (unless it is a kept other-view autosave)
+        if !self.tabs[idx].keep_autosave {
+            let _ = fs::remove_file(autosave_path_for(&self.tabs[idx].path));
+            let _ = fs::remove_file(nbtokens_path_for(&self.tabs[idx].path));
+        }
         self.tabs.remove(idx);
         if self.tabs.is_empty() {
             self.active_tab = 0;

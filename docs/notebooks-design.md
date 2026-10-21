@@ -265,7 +265,9 @@ the same view (a notebook tab needs the sidecar, a raw tab needs none). On a
 mismatch, for example a raw autosave of an `.ipynb` written before notebook
 support that now opens as a notebook, nothing is offered, the status says
 "Autosave for x.ipynb was written in a different view; not recovered", and
-both files stay on disk. A raw-tab autosave of an `.ipynb` removes a stale
+both files stay on disk. The tab sets `keep_autosave`: it never writes,
+clears or deletes that autosave (no autosave for its own edits, none removed
+on save or close). A raw-tab autosave of an `.ipynb` removes a stale
 sidecar, so the pair stays consistent.
 
 The sidecar is removed with the autosave (`core.rs:646-650`, `editor.rs:438`,

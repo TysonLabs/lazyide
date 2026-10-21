@@ -667,7 +667,7 @@ impl App {
             return Ok(());
         }
         for tab in self.all_tabs() {
-            if !tab.dirty {
+            if !tab.dirty || tab.keep_autosave {
                 continue;
             }
             let autosave = autosave_path_for(&tab.path);
@@ -701,6 +701,7 @@ impl App {
         // to a tab in the same view, and keep both files on a mismatch.
         let notebook_tab = self.tabs[self.active_tab].is_notebook();
         if nbtokens_path_for(&path).exists() != notebook_tab {
+            self.tabs[self.active_tab].keep_autosave = true;
             self.set_status(format!(
                 "Autosave for {} was written in a different view; not recovered",
                 relative_path(&self.root, &path).display()
@@ -720,7 +721,7 @@ impl App {
     }
 
     pub(crate) fn clear_autosave_for_open_file(&mut self) {
-        if let Some(tab) = self.active_tab() {
+        if let Some(tab) = self.active_tab().filter(|t| !t.keep_autosave) {
             let _ = fs::remove_file(autosave_path_for(&tab.path));
             let _ = fs::remove_file(nbtokens_path_for(&tab.path));
         }

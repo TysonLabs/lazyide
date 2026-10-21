@@ -905,6 +905,17 @@ mod tests {
             "Autosave for a.ipynb was written in a different view; not recovered"
         );
         assert_eq!(fs::read_to_string(&autosave).expect("kept"), raw);
+        // Neither an edit (autosave tick), a save nor closing the tab deletes
+        // or overwrites the autosave that was not offered.
+        let row = row_of(&app, "x");
+        edit_line(&mut app, row, "x + 1");
+        app.autosave_last_write = Instant::now()
+            .checked_sub(Duration::from_secs(10))
+            .expect("instant");
+        app.poll_autosave().expect("autosave");
+        assert_eq!(app.save_file().expect("save"), SaveOutcome::Saved);
+        app.close_file();
+        assert_eq!(fs::read_to_string(&autosave).expect("kept"), raw);
         cleanup_autosave(&path);
     }
 
@@ -928,6 +939,9 @@ mod tests {
             fs::read_to_string(autosave_path_for(&path)).expect("kept"),
             projected
         );
+        assert!(nbtokens_path_for(&path).exists());
+        app.close_file();
+        assert!(autosave_path_for(&path).exists());
         assert!(nbtokens_path_for(&path).exists());
         cleanup_autosave(&path);
     }
