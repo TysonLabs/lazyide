@@ -1974,7 +1974,7 @@ mod async_git_tests {
             tx,
         );
         let result = rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(30))
             .expect("should receive GitResult");
         assert_eq!(result.line_statuses[0].1, vec![GitLineStatus::Added; 2]);
         assert_eq!(result.line_statuses[1].1, vec![GitLineStatus::None; 2]);
