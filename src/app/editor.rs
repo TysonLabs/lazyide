@@ -11,13 +11,13 @@ use ratatui_textarea::TextArea;
 use serde_json::json;
 
 use crate::keybinds::{KeyAction, KeyScope};
+use crate::notebook::NotebookDoc;
 use crate::persistence::autosave_path_for;
-use crate::syntax::syntax_lang_for_path;
-use crate::tab::Tab;
+use crate::tab::{Tab, tab_syntax_lang};
 use crate::types::{EditorContextAction, Focus};
 use crate::util::{
-    comment_prefix_for_path, compute_fold_ranges, compute_git_line_status, editor_context_actions,
-    inside, leading_indent_bytes, relative_path, text_to_lines, to_u16_saturating,
+    compute_git_line_status, compute_tab_fold_ranges, editor_context_actions, inside,
+    leading_indent_bytes, relative_path, text_to_lines, to_u16_saturating,
 };
 
 impl App {
@@ -49,7 +49,7 @@ impl App {
             self.set_status("No file open");
             return;
         };
-        let Some(prefix) = comment_prefix_for_path(&tab.path) else {
+        let Some(prefix) = tab.comment_prefix() else {
             self.set_status("No comment style for file type");
             return;
         };
@@ -350,8 +350,12 @@ impl App {
         ta.set_cursor_line_style(Style::default().bg(self.active_theme().bg_alt));
         ta.set_selection_style(Style::default().bg(self.active_theme().selection));
 
-        let lang = syntax_lang_for_path(Some(path.as_path()));
-        let (fold_ranges, bracket_depths) = compute_fold_ranges(ta.lines(), lang);
+        // Notebook projection is wired in by the open slice; until then every
+        // tab opens as raw text.
+        let notebook: Option<NotebookDoc> = None;
+        let lang = tab_syntax_lang(&path, notebook.as_ref());
+        let (fold_ranges, bracket_depths) =
+            compute_tab_fold_ranges(ta.lines(), lang, notebook.is_some());
         let mut visible_rows_map = Vec::new();
         let mut visible_row_starts = Vec::new();
         let mut visible_row_ends = Vec::new();
@@ -366,7 +370,8 @@ impl App {
             visible_row_ends.push(0);
         }
 
-        let git_line_status = compute_git_line_status(&self.root, &path, ta.lines().len());
+        let git_line_status =
+            compute_git_line_status(&self.root, &path, ta.lines().len(), notebook.is_some());
 
         let tab = Tab {
             path: path.clone(),
@@ -390,7 +395,7 @@ impl App {
             recovery_prompt_open: false,
             recovery_text: None,
             git_line_status,
-            notebook: None,
+            notebook,
         };
 
         // If opening as preview, replace existing preview tab
@@ -903,11 +908,102 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax::SyntaxLang;
+    use crate::util::compute_fold_ranges;
     use std::fs;
     use tempfile::tempdir;
 
     fn new_app(root: &std::path::Path) -> App {
         App::new(root.to_path_buf()).expect("app should initialize")
+    }
+
+    /// Raw tabs (incl. a `.ipynb` that is not a notebook tab) keep the
+    /// path-based language at every `Tab::syntax_lang` call site, and get no
+    /// cell folds on `# %%` lines.
+    #[test]
+    fn raw_tabs_keep_path_language_folds_comment_and_keywords() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let ipynb = root.join("nb.ipynb");
+        fs::write(&ipynb, "{\n  \"cells\": [\n  ]\n}\n# %%\nx\ny\n").expect("write");
+        let py = root.join("a.py");
+        fs::write(&py, "x = 1\n").expect("write");
+        let rs = root.join("a.rs");
+        fs::write(&rs, "let x = 1;\n").expect("write");
+        let mut app = new_app(root);
+
+        app.open_file(ipynb).expect("open");
+        let tab = app.active_tab().expect("tab");
+        assert!(!tab.is_notebook());
+        assert_eq!(tab.syntax_lang(), SyntaxLang::Plain);
+        assert_eq!(app.active_syntax_lang(), SyntaxLang::Plain);
+        let (want, _) = compute_fold_ranges(tab.editor.lines(), SyntaxLang::Plain);
+        let spans = |t: &Tab| -> Vec<(usize, usize)> {
+            t.fold_ranges
+                .iter()
+                .map(|r| (r.start_line, r.end_line))
+                .collect()
+        };
+        let want: Vec<(usize, usize)> = want.iter().map(|r| (r.start_line, r.end_line)).collect();
+        assert_eq!(spans(tab), want);
+        assert!(!want.iter().any(|r| r.0 == 4), "no cell fold on a raw tab");
+        app.recompute_folds();
+        assert_eq!(spans(app.active_tab().expect("tab")), want);
+        app.toggle_comment();
+        assert_eq!(app.status, "No comment style for file type");
+
+        app.open_file(py).expect("open");
+        app.toggle_comment();
+        assert_eq!(app.active_tab().expect("tab").editor.lines()[0], "# x = 1");
+        assert!(
+            app.fallback_completion_items()
+                .iter()
+                .any(|i| i.label == "def")
+        );
+
+        app.open_file(rs).expect("open");
+        app.toggle_comment();
+        assert_eq!(
+            app.active_tab().expect("tab").editor.lines()[0],
+            "// let x = 1;"
+        );
+        assert!(
+            app.fallback_completion_items()
+                .iter()
+                .any(|i| i.label == "fn")
+        );
+    }
+
+    /// Diff view Enter on a raw tab still jumps to the hunk.
+    #[test]
+    fn diff_view_enter_jumps_on_raw_tab() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        let file = root.join("a.txt");
+        fs::write(&file, "a\nb\nc\nd\ne\n").expect("write");
+        if !(git(&["init", "-q"]) && git(&["add", "."]) && git(&["commit", "-qm", "x"])) {
+            return; // git not available
+        }
+        fs::write(&file, "a\nb\nc\nd\nE\n").expect("write");
+        let mut app = new_app(root);
+        app.open_file(file).expect("open");
+        app.open_diff_view();
+        assert!(app.diff_view.open);
+        app.handle_diff_view_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .expect("key");
+        assert!(!app.diff_view.open);
+        let row = app.active_tab().expect("tab").editor.cursor().0;
+        assert!(row > 0, "jumped into the hunk, row {row}");
     }
 
     #[test]

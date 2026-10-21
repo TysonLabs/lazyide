@@ -127,6 +127,13 @@ impl App {
                 }
             }
             KeyCode::Enter => {
+                // The view shows the raw JSON diff; its rows do not map to a
+                // notebook tab's projected cell text.
+                if self.active_tab().is_some_and(|t| t.is_notebook()) {
+                    self.diff_view.open = false;
+                    self.set_status("Diff jump is not available for notebooks");
+                    return Ok(());
+                }
                 let target = self
                     .diff_view
                     .diff
