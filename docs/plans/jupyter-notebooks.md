@@ -1,242 +1,363 @@
 # Plan: Jupyter notebook (`.ipynb`) editing
 
-Status: draft for review · Branch: `feat/jupyter-notebooks` · Issue: (linked in the PR)
+Status: revised after Codex plan review (rev 2) · Branch: `feat/jupyter-notebooks` ·
+Issue: [#51](https://github.com/TysonLabs/lazyide/issues/51)
 
 ## Goal
 
 Open a `.ipynb` file in a normal editor tab as readable cell text, edit it, and
 save it back as a valid notebook. Keep every cell's id, metadata and outputs
-that the user did not touch, and keep the file byte-identical when nothing
-changed.
+byte-for-byte unless the user deleted that cell, and keep the whole file
+byte-identical when nothing changed.
 
 ## Non-goals (v1)
 
 - Running cells or talking to a Jupyter kernel. Users run notebooks outside
-  lazyide (`jupyter nbconvert --execute --inplace x.ipynb`, or their agent);
-  the file watcher reloads a pristine tab afterwards.
+  lazyide (`jupyter nbconvert --execute --inplace x.ipynb`, or their agent).
+  The watcher picks up the new outputs (see *External changes*).
 - Rendering outputs or images in the editor. A read-only output viewer is an
   optional follow-up (Phase 3).
 - nbformat v3 and older. These open as raw JSON (see *Fallback*).
-- A new dependency. The `nbformat` crate was evaluated and rejected:
-  `serialize_notebook` refuses nbformat 4.0–4.4 and v3 (nbformat-3.0.0
-  `src/lib.rs:166-175`), always sorts keys (`:133-150`) and pulls in
-  `jupyter-protocol`, `chrono` and `uuid`. lazyide's CLAUDE.md asks for minimal
-  features with no heavy abstractions.
+- The `nbformat` crate. It was evaluated and rejected: `serialize_notebook`
+  refuses nbformat 4.0–4.4 and v3 (nbformat-3.0.0 `src/lib.rs:166-175`),
+  re-serializes every value (`:152-157`) and pulls in `jupyter-protocol`,
+  `chrono` and `uuid`. lazyide's CLAUDE.md asks for minimal features with no
+  heavy abstractions.
 
 ## Design
 
-### Projection format (jupytext "percent" format, subset)
+### Projection format (jupytext "percent" style with identity tokens)
 
 ```
-# %%
+# %% #1
 import pandas as pd
 df = pd.read_csv("x.csv")
 
-# %% [markdown]
+# %% [markdown] #2
 # # Title
 #
 # Some *markdown* text.
 
-# %% [raw]
+# %% [raw] #3
 # raw cell text
 ```
 
-- One marker line per cell: `# %%` (code), `# %% [markdown]`, `# %% [raw]`.
-- Code cell lines appear verbatim.
-- Markdown and raw lines get a `# ` prefix; an empty line becomes `#`. On parse,
-  strip `# `, or turn a lone `#` into an empty line; keep any other line
-  verbatim (the user typed it without a prefix).
-- Exactly one blank separator line goes before each marker except the first.
-  On parse, drop exactly one trailing blank line from a cell that is followed
-  by another marker. Every other blank line belongs to the cell source.
-- The marker grammar is `^# %%( \[(markdown|raw)\])?$`. Any other line that
-  starts with `# %%` in projected output is a collision (see *Fallback*).
+- One marker line per cell. The marker grammar is
+  `^# %%( \[(markdown|raw)\])?( #[0-9]+)?$`.
+- **Identity token `#N`** = the cell's 1-based index in the notebook on disk,
+  as of the last open, reload or save. It is the only thing that ties a
+  projected cell to its JSON cell. Source text and position are never used
+  for identity (Codex F1). After a save or reload, the marker lines are
+  renumbered in place (see *Save*).
+- Token rules at save:
+  - No token: a new cell.
+  - A token that is out of range: a new cell.
+  - A token used twice (for example a copy-pasted cell): the first occurrence
+    in buffer order keeps the identity, and the later ones are new cells.
+  - A known token whose marker type changed (code → markdown): a new cell.
+    Code outputs must not move onto a markdown cell.
+- Code cell lines appear verbatim. Markdown and raw lines get a `# ` prefix,
+  and an empty line becomes `#`. On parse, strip `# `, or turn a lone `#` into
+  an empty line, and keep any other line verbatim.
+- One blank separator line goes before each marker except the first. On parse,
+  drop exactly one trailing blank line from a cell that is followed by
+  another marker.
 
-Required property (tested): `parse(project(nb)) == nb.cells` for every cell
-source, including empty sources, sources that end with `\n`, sources that end
-with blank lines and sources with `\r\n`.
+**Lossless rule (Codex F2).** The projection is not injective: `"x"` and
+`"x\n"` project the same, and `text_to_lines` (`src/util.rs:19`, `str::lines`)
+drops `\r`. Losslessness therefore does not depend on parsing back:
+- If a token-matched cell's visible text equals the projection of its original
+  source, the original JSON `source` value is written back unchanged (raw
+  bytes, see *Writing bytes*). Trailing newlines, `\r\n` and string-vs-list
+  form all survive.
+- Only a cell whose visible text changed gets a new `source`, built from the
+  visible text: LF line endings, no trailing `\n`, and the list form unless
+  the original used a string. This normalization is documented in the README.
 
 ### Module and state
 
-- New `src/notebook.rs` (pure functions, no `App` access), matching the flat
-  module layout:
-  - `fn project(bytes: &str) -> Result<NotebookDoc, NotebookOpenError>`.
-  - `fn rebuild(doc: &NotebookDoc, edited_text: &str) -> Result<RebuiltNotebook, NotebookSaveError>`.
-- `NotebookDoc` holds `original_bytes: String`, the parsed
-  `root: serde_json::Value`, the original cells as `Vec<OrigCell>` (index, type,
-  source as parsed lines, source form = list or string), `nbformat_minor`,
-  `canonical: bool` and `projected_text: String`.
-- `Tab` gets `notebook: Option<NotebookDoc>` (`src/tab.rs`). Two test `Tab`
-  literals in `src/lsp_client.rs:482`, `:514` need the field.
-- Notebook mode is decided once at open from the extension and stored on the
-  tab. No other code re-derives it from the path.
+- New `src/notebook.rs` with pure functions and no `App` access, matching the
+  flat module layout:
+  - `project(bytes: &str) -> Result<NotebookDoc, NotebookOpenError>`.
+  - `rebuild(doc: &NotebookDoc, edited: &str) -> Result<Rebuilt, NotebookSaveError>`.
+    `Rebuilt` holds the bytes to write plus the renumbered projected text.
+  - `strip_tokens(text) -> String` (used by recovery).
+- `NotebookDoc` holds:
+  - `original_bytes: String` and `disk_digest: u64` (std `DefaultHasher`,
+    change detection only);
+  - the root as an ordered list of `(key, Box<RawValue>)`;
+  - per cell: its raw object as an ordered list of `(key, Box<RawValue>)`,
+    its type, and its visible projected text;
+  - `nbformat_minor`, `layout_canonical: bool`, `lang: SyntaxLang` and
+    `projected_text: String`.
+- `Tab` gets `notebook: Option<NotebookDoc>` (`src/tab.rs`). The two test
+  `Tab` literals in `src/lsp_client.rs:482`, `:514` need the field.
+- **Mode lives on the tab (Codex F8).** Every notebook-specific branch checks
+  `tab.notebook.is_some()`, never the `.ipynb` extension. A `.ipynb` that fell
+  back to raw JSON behaves exactly as today, gutter and jumps included.
+- **Language lives on the tab (Codex F11).** Add `Tab::syntax_lang()`, which
+  returns `notebook.lang` for notebook tabs and `syntax_lang_for_path(path)`
+  otherwise. Replace the path-based calls at:
+  - `src/app/editor.rs:353` (open folds);
+  - `src/app/core.rs:687` (recompute folds);
+  - `src/ui/mod.rs:338` (render);
+  - `src/app/lsp.rs:434` (keyword completion);
+  - `src/util.rs:132` `comment_prefix_for_path`, used by `toggle_comment`
+    (`src/app/editor.rs:52`). This one gets a tab-aware variant.
 
-### Save: matching edited cells to original cells
+  `notebook.lang` comes from `metadata.kernelspec.language` or
+  `language_info.name` when that maps to a supported `SyntaxLang`, and is
+  Python otherwise.
 
-`rebuild` parses the edited text into cells `(type, source)` and matches them
-to the original cells:
+### Validation and fallback (fail closed to raw JSON; Codex F6)
 
-1. LCS over the two cell sequences keyed by `(type, source)`. A matched cell
-   keeps its JSON object unchanged, including id, metadata, outputs and
-   `execution_count`.
-2. Inside each unmatched gap, pair cells by position when they have the same
-   type. A paired cell keeps id, metadata, outputs and `execution_count`, and
-   only `source` is replaced. Outputs are kept, as Jupyter and VS Code do: an
-   edited cell's outputs are stale until it is run again.
-3. Any other edited cell is new: `{cell_type, metadata: {}, source}`, plus
-   `outputs: []` and `execution_count: null` for code. It also gets an `id`
-   when `nbformat_minor >= 5`. The id is 8 random hex chars, unique within the
-   notebook, generated from `std` (`RandomState` hash of time and a counter),
-   so no `uuid` dependency is needed.
-4. Original cells left unmatched are deleted.
-5. A cell whose type changed is new (code to markdown must drop `outputs`).
+`project` returns `Err`, and the file opens as plain text like today (status:
+`Opened x.ipynb as raw JSON: <reason>`), when any of these hold:
+- the JSON is invalid;
+- the root is not an object, or `nbformat != 4`, or `nbformat_minor` is not
+  an integer;
+- the root `metadata` is not an object, or `cells` is not an array;
+- a cell is not an object, or its `cell_type` is not
+  `code`/`markdown`/`raw`;
+- a cell's `source` is not a string or a list of strings, or its `metadata`
+  is not an object;
+- a code cell lacks `outputs` (array) or `execution_count` (int or null);
+- for `nbformat_minor >= 5`, a cell lacks a non-empty string `id`, or two
+  cells have the same `id`;
+- any projected non-marker line matches `^# %%`, or the marker count is not
+  the cell count. This catches a code cell that contains `# %%` and a
+  markdown line `%%…`.
 
-Source form: write `source` in the cell's original form (list of lines with
-trailing `\n` except the last, or a single string). New cells use the list form.
+A raw-JSON tab has `notebook: None`.
 
-### Save: writing bytes
+### Save
 
-- If the rebuilt cell list equals the original (every cell matched in step 1
-  and the order is unchanged), write `original_bytes` verbatim. This applies
-  lesson l746: a no-op save must not rewrite the file.
-- Otherwise serialize the patched `root` the way Python `nbformat.write` does:
-  keys sorted, indent 1, `ensure_ascii=False`, trailing newline. serde_json's
-  default `Map` (a BTreeMap, since `preserve_order` is off today) sorts keys,
-  and `PrettyFormatter::with_indent(b" ")` gives indent 1.
-- `canonical` is computed at open as `serialize(parse(bytes)) == bytes`. It is
-  false for notebooks from writers that differ, for example on float spelling
-  (`1e-05` vs `1e-5`), key order or escapes. If it is false, the first real
-  save asks "This notebook's JSON layout differs from Jupyter's. Saving will
-  reformat it (cell contents are kept). Save? (y/n)", and the answer is kept
-  for the tab's lifetime. This prompt goes through the existing
-  `PendingAction` mechanism. No `serde_json` feature flags are added, because
-  `preserve_order` and `arbitrary_precision` would change behaviour for the
-  keybinds, theme, state and LSP code (`src/keybinds.rs`, `src/theme.rs`,
-  `src/persistence.rs`, `src/lsp_client.rs`).
-- The `open_disk_snapshot` and the autosave stay in **projected** space: after
-  save, `open_disk_snapshot = projected text`, and `doc` is replaced with
-  `project(written_bytes)` so the next save diffs against what is on disk.
+`save_file` returns `SaveOutcome { Saved, Deferred, Failed }` (Codex F5). All
+four callers handle it:
+- `src/app/input_handlers.rs:418` Save key: save only.
+- `src/app/core.rs:556` palette Save: save only.
+- `src/app/input_handlers.rs:229` close prompt Ctrl+S: save, then close only
+  on `Saved`.
+- `src/app/input_handlers.rs:235` close prompt Enter: save, then close only on
+  `Saved`.
 
-### Fallback (fail closed to raw JSON)
+`rebuild` steps:
+1. Parse the buffer into cells with tokens, using the token rules above.
+2. If every original cell is present once, in the original order, with the
+   same type, and with unchanged visible text: write `original_bytes`
+   verbatim, then return. This applies lesson l746: a no-op save never
+   rewrites the file.
+3. Otherwise assemble the file:
+   - Each kept cell is its original raw object. If its visible text changed,
+     only its `source` entry is replaced.
+   - New cells are `{cell_type, metadata: {}, source}`. Code cells also get
+     `outputs: []` and `execution_count: null`, and an `id` when
+     `nbformat_minor >= 5`: 8 random hex chars, unique, from std
+     (`RandomState` hash of time and a counter), with no `uuid` dependency.
+   - Deleted cells are dropped.
+4. Edited cells keep their outputs and `execution_count`. Jupyter and VS Code
+   do the same: the outputs are stale until the cell runs again.
+5. The returned projected text has the markers renumbered (`#1…#n`) and new
+   cells tokenized. The tab replaces **only the marker lines** in the editor
+   buffer. The row count is unchanged, so the cursor and scroll stay put.
+   Then `open_disk_snapshot = projected`, and `doc = project(written_bytes)`.
 
-`project` returns an error, and the file opens as plain text like today
-(status: `Opened x.ipynb as raw JSON: <reason>`) when:
-- the JSON is invalid (the user can then fix it);
-- `nbformat != 4` or `cells` is missing or not an array;
-- a cell has an unknown `cell_type` or a non-string/non-list `source`;
-- any projected line matches `^# %%` but is not one of this notebook's
-  markers, for example a code cell that contains a `# %%` line or a markdown
-  line that is `%%…`. A post-projection check (marker count == cell count)
-  catches every case.
+### Writing bytes (Codex F4, F7)
 
-A tab opened as raw JSON has `notebook: None` and behaves exactly as today.
+Untouched JSON values are **never re-serialized**. Enable serde_json's
+`raw_value` feature. It is additive: it only adds `RawValue` and does not
+change `Value` or number parsing for the keybinds, theme, persistence or LSP
+code. The root and each cell are parsed as ordered
+`Vec<(String, Box<RawValue>)>` through a small `Visitor`, so key order is kept
+without `preserve_order`. The writer emits:
+- the original key order;
+- the Jupyter layout (indent 1, `": "`, `",\n"`, trailing newline) around the
+  raw values;
+- raw values verbatim. A raw value carries its own internal layout, which in a
+  Jupyter-written file already matches its depth.
+- new or changed strings, which go through `serde_json::to_string` (that
+  matches Python's `ensure_ascii=False` escaping for typical text: `\n`, `\"`,
+  `\\`, `\u001b`; a fixture test proves it).
 
-### Touchpoints (from the code survey)
+So no number is ever reformatted (`1e-05` and integers beyond u64 survive),
+and floats need no Python-compatible printer.
+
+`layout_canonical` is set at open to `assemble(unchanged doc) == original_bytes`.
+It is false only when the outer layout differs from Jupyter's (another indent
+width, or whitespace between keys). Then the first real save asks:
+"Saving will change this notebook's JSON whitespace. Cell contents and outputs
+are kept. Save? (y/n)". This is a new `PendingAction::NotebookReformat
+{ then_close: bool }`, with the same input, mouse-modal, hint and render wiring
+as the existing prompts:
+- `src/app/input_handlers.rs:200-250` (key handling);
+- the pending hint in `src/util.rs` `pending_hint`;
+- the overlay in `src/ui/overlays.rs`.
+
+The answer is kept for the tab's lifetime. The answer `y` with
+`then_close: true` saves and closes. The answer `n` leaves the tab open and
+dirty.
+
+### External changes (Codex F3)
+
+The comparison uses **raw bytes** (`disk_digest`) and projected text separately.
+- **`reload_open_file_from_disk_if_pristine`** (`src/app/core.rs:318-347`,
+  early return at `:328`): if the disk digest changed, re-`project`, then
+  replace `doc`. Replace the buffer text only when the projected text differs.
+  Our own save writes bytes whose digest is recorded, so it is a no-op.
+- **`maybe_flag_external_conflict`** (`src/app/core.rs:652-674`) on a dirty
+  tab whose disk digest changed:
+  - If the disk cells have the same count, types and visible texts as the
+    current `doc`, only outputs, metadata or execution counts changed (for
+    example after `nbconvert --execute`). Swap `doc` to the disk doc
+    silently. The tokens stay valid, because the indices are unchanged. Status:
+    "Notebook outputs updated on disk".
+  - Otherwise raise the existing conflict prompt, with a projected
+    `conflict_disk_text` and the disk `NotebookDoc` stored next to it.
+- **Conflict keys** (`src/app/input_handlers.rs:839-881`): `R` loads the disk
+  text and the disk doc. `K` keeps the buffer and adopts the disk doc as the
+  base, so the next save rebases onto the new outputs. The buffer's tokens
+  then refer to the disk doc's indices, and step 1's rules apply (missing or
+  changed means new). `D` also adopts the disk doc.
+
+### Autosave and recovery
+
+The autosave stays as projected text (`src/app/core.rs:610-626`). Next to it,
+write `<autosave>.nbdigest` containing the `disk_digest` the tokens refer to.
+In `check_recovery_for_open_file` (`:628-644`), a mismatched or missing
+digest means the tokens are stale. The recovered text then goes through
+`strip_tokens`, so every cell becomes new: text is recovered, but outputs are
+not attached to the wrong cell. The recovery prompt says so. The digest file
+is removed with the autosave (`core.rs:646-650`, `editor.rs:438`, `:474`).
+
+### Other touchpoints
 
 | # | Site | Change |
 |---|---|---|
-| 1 | `src/app/editor.rs:340-348` `open_file_as` | For `.ipynb`, `project()`; on Ok, load `projected_text` and set `tab.notebook`; on Err, fall back with status |
-| 2 | `src/app/editor.rs:422-450` `save_file` | For notebook tabs, `rebuild()`, the reformat prompt when `!canonical`, write, then refresh `doc` and snapshot |
-| 3 | `src/app/core.rs:318-347` `reload_open_file_from_disk_if_pristine` | Project disk bytes before comparing, replacing and storing the snapshot; refresh `doc`. Without this, our own save triggers a reload into raw JSON |
-| 4 | `src/app/core.rs:652-674` `maybe_flag_external_conflict` | Project disk bytes before comparing; store projected `conflict_disk_text` plus the disk `NotebookDoc` |
-| 5 | `src/app/input_handlers.rs:839-881` conflict `R`/`K`/`D` | `R` also swaps in the disk `NotebookDoc` |
-| 6 | `src/app/core.rs:610-644`, `input_handlers.rs:803-835` autosave and recovery | No change: they already work on editor text (projected). Recovery applied over a fresh `doc` from disk works through the step-1/2 matching |
-| 7 | `src/util.rs:208-255` `compute_git_line_status` | Return all `None` for `.ipynb` (JSON line numbers do not map). Projected-vs-projected gutter is Phase 3 |
-| 8 | `src/app/git_diff.rs:126-136` diff view Enter jump | Diff view still shows the raw JSON diff, which is useful; Enter on a notebook hunk shows a status and does not jump |
-| 9 | `src/app/search.rs:106-131` project search jump | For an `.ipynb` hit, jump to the k-th projected line that matches the query with the same matching mode rg used (k = the hit's index among that file's hits); fall back to the first match, then line 0 with a status |
-| 10 | `src/app/file_tree.rs:91-101` `retarget_tabs_for_rename` | If a rename changes whether the path is `.ipynb`: refuse when the tab is dirty ("Save before renaming"); otherwise close and reopen the tab at the new path |
-| 11 | `src/syntax.rs:21-44` | `ipynb` maps to the kernel language from `metadata.kernelspec.language` / `language_info.name` when it is a supported `SyntaxLang`; Python otherwise |
-| 12 | `src/util.rs:467-607` `compute_fold_ranges` callers (`editor.rs:354`, `core.rs:683-696`) | Add `compute_cell_fold_ranges(lines)` (marker to the line before the next marker) and merge it for notebook tabs only |
-| 13 | `src/ui/mod.rs` editor line render | Draw marker lines with the accent color and bold, so cells are visibly separated |
-| 14 | `src/app/lsp.rs:434` keyword completion | Uses the tab's notebook language (from #11) |
+| 1 | `src/app/editor.rs:340-348` `open_file_as` | For `.ipynb`: on `project()` Ok, load `projected_text` and set `tab.notebook`; on Err, fall back with status |
+| 2 | `src/util.rs:437-460` `spawn_git_refresh` + `compute_git_line_status` (`:208-255`) | Pass `is_notebook: bool` per tab (from `tab.notebook`); notebooks get an all-`None` gutter. A projected gutter is Phase 3 |
+| 3 | `src/app/git_diff.rs:126-136` diff view Enter | The view still shows the raw JSON diff. On a notebook tab, Enter shows a status and does not jump |
+| 4 | `src/app/search.rs:63-131` project search (Codex F9) | Run the existing rg command with `--glob '!*.ipynb'`. List notebooks with `rg --files --glob '*.ipynb'`, so ignore rules match. For each one, `project()` it and pipe the projected text to `rg --line-number --smart-case <query> -` on stdin. That gives the same regex and smart-case rules with no new dependency. Hits carry projected line numbers, so the jump is exact, and output/metadata text is never searched. A notebook that fails to project is searched raw, as today. Cap at 500 notebooks per search, with a status note when the cap is reached. Classify an rg exit code of 1 (no match) separately from 2 (error) |
+| 5 | `src/app/file_tree.rs:466-490` rename (Codex F10) | **Before** `fs::rename` (`:486`), find open tabs at or under the target whose notebook mode would change. If any is dirty, refuse ("Save x.ipynb before renaming"). After the rename, close and reopen the affected clean tabs |
+| 6 | `src/util.rs:467-607` fold callers | Add `compute_cell_fold_ranges(lines)` (from a marker to the line before the next marker) and merge it in for notebook tabs |
+| 7 | `src/ui/mod.rs` line render | Draw marker lines in the accent color, bold, so cells are visibly separated |
 
-Blast-radius notes (grep done on the survey branch):
-- `open_disk_snapshot` readers: only the conflict paths (#4, #5).
-- `dirty` is a flag set by `mark_dirty`, never compared to the snapshot, so it
-  needs no change.
+Blast-radius notes:
+- `open_disk_snapshot` readers are only the conflict paths.
+- `dirty` is a flag set by `mark_dirty` and is never compared to the snapshot.
 - `poll_fs_changes` (`src/app/core.rs:226-297`) checks only the active tab.
-  This is existing behaviour and is not changed here.
-- `spawn_git_refresh` (`src/util.rs:437-460`) runs off-thread without tab
-  state, so #7 decides by path only.
-- Every `all_tabs()` iteration was checked: none read or write file bytes.
+  This is existing behaviour, unchanged.
+- `all_tabs()` iterations (autosave, git refresh, LSP diagnostics, rename
+  retarget, dirty check, wrap rebuild) were each checked. Autosave gains the
+  digest sidecar, git refresh gains `is_notebook`, rename gains the preflight,
+  and the others need no change.
+- `syntax_lang_for_path` callers are all listed above.
+- `save_file` callers are all listed above.
 
 ## Testing
 
 All tests are inline `#[cfg(test)]` modules, per CONTRIBUTING.md.
 
-Fixtures in `src/notebook/testdata/` (loaded with `include_str!`). These are
-**generated by real writers, not hand-written**, so the canonical serializer
-is checked against the real format:
-- JupyterLab-saved nbformat 4.5 (ids, outputs incl. `image/png`, stream,
-  error with ANSI).
-- nbformat 4.4 without ids (Python `nbformat.v4` writer).
-- Cells with string-form `source`.
-- VS Code-saved notebook.
-- A non-canonical notebook (float `1e-05` in metadata).
-- A code cell that contains `# %%` (must fall back).
+Fixtures live in `src/notebook/testdata/` and are loaded with `include_str!`.
+**They are generated by real writers, not written by hand**:
+- JupyterLab nbformat 4.5 with `image/png`, stream and ANSI error outputs;
+- nbformat 4.4 without ids;
+- string-form `source`;
+- a source with `\r\n`;
+- metadata with `1e-05` and an integer beyond u64;
+- VS Code-saved;
+- indent-2 JSON (non-canonical layout);
+- a code cell containing `# %%`;
+- a 4.5 notebook missing a cell id.
 
 Unit tests (`src/notebook.rs`):
-1. Byte identity: open then save with no edits, for each fixture. Bytes equal
-   `original_bytes`.
-2. Canonical check: for each Jupyter-written fixture `canonical == true`;
-   for the non-canonical fixture `false`.
-3. Projection round-trip property over generated cell lists (edge cases above).
-4. Edit one code cell: only that cell's `source` changes in the JSON (assert
-   with a structural diff of the two `Value`s). Id, metadata and outputs kept.
-5. Insert a cell, delete a cell, swap two cells, change a cell's type: assert
-   outputs move with their cells and are never attached to another cell.
-6. New-cell id: present only for `nbformat_minor >= 5`, unique.
-7. Each fallback reason returns `Err`. The open path (App-level test) shows raw
-   JSON and `notebook == None`.
+1. Byte identity: open, then save with no edits, for each fixture.
+2. `layout_canonical` is true for the Jupyter and VS Code fixtures and false
+   for the indent-2 fixture.
+3. Edit one cell: the output differs from the original only inside that
+   cell's `source`, compared at the byte level.
+4. The F1 scenario: delete cell A and edit cell B. B keeps B's outputs, and
+   A's outputs are gone.
+5. The token rules: missing, out of range, duplicate and type change each
+   produce a new cell. Cell swap, insert and delete keep outputs with the
+   right cell.
+6. Unchanged visible text keeps `\r\n`, a trailing `\n` and string form.
+7. Numbers in untouched cells survive (`1e-05`, an integer beyond u64), as do
+   numbers in an edited cell's outputs.
+8. New-cell ids exist only for `nbformat_minor >= 5` and are unique.
+9. Each fallback reason returns `Err`.
 
-App-level tests (`tempdir` + `App::new` + `open_file`, the existing pattern):
-8. Save then fs poll: the tab stays in projected text (#3 regression).
-9. External change while dirty raises a conflict prompt only when the
-   projected disk text differs (#4). External change while pristine reloads
-   projected text.
-10. Recovery: an autosave with an edit is applied, then a save keeps the
-    outputs of untouched cells.
-11. Rename `.ipynb` to `.py` while dirty is refused; while clean, it reopens as
-    plain text.
-12. Project-search jump lands on the matching projected line.
+App-level tests (`tempdir` + `App::new` + `open_file`):
+10. Save, then fs poll: the buffer stays projected, and the markers are
+    renumbered without moving the cursor.
+11. Outputs-only external change on a dirty tab: no conflict, and the next
+    save keeps the new outputs together with the local edit (F3).
+12. A structural external change on a dirty tab raises the conflict prompt.
+    `K` then save rebases onto the disk doc.
+13. A non-canonical notebook, close prompt, Enter: the reformat prompt shows
+    and the tab stays open. Answering `y` saves and closes; answering `n`
+    keeps the tab dirty (F5).
+14. Recovery with a stale digest strips tokens, and the text is recovered
+    without misattached outputs.
+15. Renaming a dirty notebook from `.ipynb` to `.py` is refused before any disk
+    change. When clean, it reopens as plain text (F10).
+16. A raw-fallback `.ipynb` keeps its git gutter and raw search jumps (F8).
+17. A project-search hit in a notebook cell jumps to the right projected line.
+    A hit that appears only in an output is not listed (F9).
+18. A notebook with a Rust kernel highlights as Rust and comment-toggles with
+    `//` (F11).
 
-Each test must fail without its change. For #3, #4 and #11, run the test once
-on the unmodified code and record it in the PR.
+Each test must fail without its change. Run tests 10–17 once against the
+unmodified code (or with the fix commented out) and record that in the PR.
 
 Gate (the same as CI): `cargo fmt --all -- --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 
 ## Docs (same PR)
 
-- `README.md`: the Editor features list (`:68-75`), a new "Notebooks" section
-  (format, what is kept, the reformat prompt, fallback, no execution,
-  `nbconvert` tip), and the Git section note (no gutter for notebooks; the diff
-  view shows JSON).
-- `docs/ARCHITECTURE.md`: the module list (`notebook.rs`), Syntax Highlighting,
-  Git Integration, and the test count.
+- `README.md`:
+  - the Editor features list (`:68-75`);
+  - a new "Notebooks" section: the format, the `#N` tokens, what is kept, the
+    edited-source normalization, the reformat prompt, fallback, no execution,
+    the `nbconvert` tip, and outputs refreshing on disk change;
+  - the Git section note: no gutter for notebooks, and the diff view shows
+    JSON;
+  - the project-search note: notebooks are searched by cell text.
+- `docs/ARCHITECTURE.md`: the module list (`notebook.rs`), Syntax Highlighting
+  (the tab-stored language), Git Integration, and the test count.
 - `CONTRIBUTING.md:130-136`: a note that `.ipynb` is not a language entry.
 - `CLAUDE.md`: the module list and overview, and correct "no CI/CD" (CI runs
   fmt, clippy and test in `.github/workflows/ci.yml`).
-- Delete this plan file, or move it under `docs/` as the design note, when the
-  feature merges.
+- Move this plan to `docs/notebooks-design.md` when it merges, and link it
+  from the README Documentation section, which is the docs index.
 
 ## Phases and effort
 
 | Phase | Content | Estimate |
 |---|---|---|
-| 1 | `notebook.rs` (project, rebuild, serializer, fallback) and its unit tests with fixtures | 2–3 days |
-| 2 | App wiring #1–#14, App-level tests, docs | 2–3 days |
-| 3 (optional, separate PR) | Read-only output viewer overlay for the cursor's cell (text/plain, stream, error with ANSI stripped, `[image/png 640×480]` placeholders); projected git gutter via `git show HEAD:path` | 2–3 days |
+| 1 | `notebook.rs`: projection, tokens, validation, raw-value writer and unit tests with fixtures | 3–4 days |
+| 2 | App wiring (save outcome and prompt, watcher and conflict, recovery digest, language on tab, search, rename, gutter, folds, render), App-level tests, docs | 3–4 days |
+| 3 (optional, separate PR) | Read-only output viewer for the cursor's cell; a projected git gutter via `git show HEAD:path` | 2–3 days |
 
-Phases 1 and 2 ship as one PR (about 1.2–1.8K lines, mostly tests and
-fixtures). Phase 3 needs a new keybinding; read the key matcher in
-`src/keybinds.rs` before choosing the default (lesson: the key you type may not
-be the key the code sees).
+Phases 1 and 2 ship as one PR (about 2–2.5K lines, mostly tests and fixtures).
+Phase 3 needs a new keybinding: read the key matcher in `src/keybinds.rs`
+before choosing the default.
 
-## Open questions for review
+## Review log
 
-1. Keep stale outputs on an edited cell (the Jupyter and VS Code behaviour), or clear them?
-2. Is the LCS-plus-positional pairing safe enough, or should markers carry a
-   cell id (`# %% id=abc`)? That clutters the text but makes identity exact.
-3. Is the reformat prompt for non-canonical notebooks the right default, or
-   should those open read-only?
+Rev 2 folds in all 11 findings from the Codex plan review (all accepted after
+checking the code):
+- F1: identity tokens.
+- F2: the lossless rule.
+- F3: raw-digest external changes.
+- F4/F7: the raw-value writer replaces re-serialization (F7 amended: the plan
+  had called `1e-05` non-canonical, which is wrong, because Python writes
+  `1e-05`).
+- F5: `SaveOutcome` plus `NotebookReformat { then_close }`.
+- F6: full validation.
+- F8: mode on the tab.
+- F9: projected search.
+- F10: rename preflight.
+- F11: language on the tab.
+
+Open question carried forward: keep stale outputs on edited cells (current
+choice, the same as Jupyter and VS Code) or clear them.
