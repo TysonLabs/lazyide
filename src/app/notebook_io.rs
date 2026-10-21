@@ -50,11 +50,38 @@ impl App {
     /// The caller runs the common after-save steps on `Saved`.
     pub(crate) fn save_notebook(&mut self) -> io::Result<SaveOutcome> {
         let idx = self.active_tab;
-        let tab = &self.tabs[idx];
-        let Some(doc) = tab.notebook.as_ref() else {
+        let Some(doc) = self.tabs[idx].notebook.as_ref() else {
             return Ok(SaveOutcome::Failed);
         };
-        let path = tab.path.clone();
+        let path = self.tabs[idx].path.clone();
+
+        // The watcher is debounced, so saving can race ahead of its external-
+        // change handling. Reconcile the disk here too: otherwise a rebuild
+        // from the stale doc can discard newly written outputs or structural
+        // changes. A version explicitly kept by K/D/Esc is already recorded
+        // in open_disk_snapshot and is intentionally overwritten below.
+        if let Ok(disk_text) = read_lossy(&path) {
+            let disk_changed = notebook::digest(disk_text.as_bytes()) != doc.disk_digest();
+            let acknowledged =
+                self.tabs[idx].open_disk_snapshot.as_deref() == Some(disk_text.as_str());
+            if disk_changed && !acknowledged {
+                if self.tabs[idx].dirty {
+                    self.flag_notebook_conflict(&path)?;
+                    if self.tabs[idx].conflict_prompt_open {
+                        self.set_status(
+                            "Notebook changed on disk; resolve the conflict before saving",
+                        );
+                        return Ok(SaveOutcome::Failed);
+                    }
+                } else {
+                    self.reload_pristine_notebook(&path)?;
+                    return Ok(SaveOutcome::Saved);
+                }
+            }
+        }
+
+        let tab = &self.tabs[idx];
+        let doc = tab.notebook.as_ref().expect("notebook mode checked above");
         let edited = tab.editor.lines().join("\n");
         let rebuilt = match notebook::rebuild(doc, &edited) {
             Ok(rebuilt) => rebuilt,
@@ -609,6 +636,38 @@ mod tests {
         let written = cells(&path);
         assert_eq!(written[0]["outputs"][0]["data"]["text/plain"][0], "42");
         assert_eq!(source(&written[2]), "y = 20");
+    }
+
+    /// Saving can happen before the debounced watcher handles a disk event.
+    /// The save path itself must adopt output-only updates and must stop for
+    /// a structural conflict instead of rebuilding from the stale document.
+    #[test]
+    fn save_preflights_external_notebook_change() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, path) = open(tmp.path(), "outputs.ipynb", V44);
+        let row = row_of(&app, "y = 2");
+        edit_line(&mut app, row, "y = 20");
+        let disk = V44.replace("\"1\"\n", "\"42\"\n");
+        fs::write(&path, &disk).expect("external output write");
+
+        // Do not poll the watcher: save must still merge the disk outputs.
+        assert_eq!(app.save_file().expect("save"), SaveOutcome::Saved);
+        let written = cells(&path);
+        assert_eq!(written[0]["outputs"][0]["data"]["text/plain"][0], "42");
+        assert_eq!(source(&written[2]), "y = 20");
+
+        let (mut app, path) = open(tmp.path(), "structural.ipynb", V44);
+        let row = row_of(&app, "y = 2");
+        edit_line(&mut app, row, "y = 20");
+        let mut changed: Value = serde_json::from_str(V44).expect("json");
+        changed["cells"].as_array_mut().expect("cells").remove(0);
+        let disk = serde_json::to_string_pretty(&changed).expect("serialize");
+        fs::write(&path, &disk).expect("external structural write");
+
+        assert_eq!(app.save_file().expect("save"), SaveOutcome::Failed);
+        assert!(app.tabs[0].conflict_prompt_open);
+        assert_eq!(fs::read_to_string(&path).expect("read"), disk);
+        assert!(app.tabs[0].dirty);
     }
 
     /// Plan test 12: a structural change raises the conflict prompt; `K`
