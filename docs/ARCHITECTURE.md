@@ -16,7 +16,7 @@ src/
     editor.rs          File open/save/close, clipboard, fold, scroll, comment, dedent
     file_tree.rs       Tree build, navigation, file create/rename/delete
     lsp.rs             LSP lifecycle, completion, diagnostics, go-to-definition
-    search.rs          Find/replace in file, project search (ripgrep)
+    search.rs          Find/replace in file, project search (ripgrep; notebooks searched by projected cell text)
     git_diff.rs        Diff view open/scroll/hunk keys, next/previous change jumps
     panes.rs           Two-pane split: swap-based focus, split/close/move, layout, divider drag
   ui/
