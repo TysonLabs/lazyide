@@ -21,13 +21,13 @@ use crate::lsp_client::resolve_rust_analyzer_bin;
 use crate::persistence::{
     PersistedState, autosave_path_for, load_persisted_state, save_persisted_state,
 };
-use crate::syntax::syntax_lang_for_path;
+use crate::syntax::SyntaxLang;
 use crate::tab::{FoldRange, Tab};
 use crate::theme::{Theme, load_themes};
 use crate::types::{CommandAction, Focus, PendingAction, PromptMode, PromptState};
 use crate::util::{
-    command_action_label, compute_fold_ranges, compute_git_change_summary,
-    compute_git_file_statuses, detect_git_branch, relative_path, spawn_git_refresh, text_to_lines,
+    command_action_label, compute_git_change_summary, compute_git_file_statuses,
+    compute_tab_fold_ranges, detect_git_branch, relative_path, spawn_git_refresh, text_to_lines,
     wrap_segments_for_line,
 };
 
@@ -279,9 +279,12 @@ impl App {
                     self.set_status("Git refresh thread panicked");
                 }
                 let root = self.root.clone();
-                let tab_paths: Vec<(PathBuf, usize)> = self
+                let tab_paths: Vec<(PathBuf, usize, bool)> = self
                     .all_tabs()
-                    .map(|tab| (tab.path.clone(), tab.editor.lines().len()))
+                    .map(|tab| {
+                        let lines = tab.editor.lines().len();
+                        (tab.path.clone(), lines, tab.is_notebook())
+                    })
                     .collect();
                 let (tx, rx) = mpsc::channel();
                 self.git_result_rx = Some(rx);
@@ -360,6 +363,12 @@ impl App {
 
     pub(crate) fn open_path(&self) -> Option<&PathBuf> {
         self.active_tab().map(|t| &t.path)
+    }
+
+    /// Syntax language of the active tab (Plain with no tab open).
+    pub(crate) fn active_syntax_lang(&self) -> SyntaxLang {
+        self.active_tab()
+            .map_or(SyntaxLang::Plain, Tab::syntax_lang)
     }
 
     pub(crate) fn is_dirty(&self) -> bool {
@@ -684,9 +693,8 @@ impl App {
         let Some(tab) = self.active_tab() else {
             return;
         };
-        let lang = syntax_lang_for_path(Some(tab.path.as_path()));
         let (fold_ranges, bracket_depths) =
-            compute_fold_ranges(self.tabs[self.active_tab].editor.lines(), lang);
+            compute_tab_fold_ranges(tab.editor.lines(), tab.syntax_lang(), tab.is_notebook());
         let tab = &mut self.tabs[self.active_tab];
         tab.fold_ranges = fold_ranges;
         tab.bracket_depths = bracket_depths;
