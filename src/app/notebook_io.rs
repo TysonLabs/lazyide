@@ -867,6 +867,76 @@ mod tests {
         cleanup_autosave(&path);
     }
 
+    /// Upgrade case: a pre-notebook raw autosave of an `.ipynb` (no
+    /// sidecar) is not offered to the notebook tab, and is kept on disk.
+    #[test]
+    fn raw_autosave_is_not_offered_to_notebook_tab() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("a.ipynb");
+        fs::write(&path, V44).expect("write");
+        let autosave = autosave_path_for(&path);
+        fs::create_dir_all(autosave.parent().expect("parent")).expect("mkdir");
+        let raw = V44.replace("\"x = 1\"", "\"x = 9\"");
+        fs::write(&autosave, &raw).expect("autosave");
+        let mut app = App::new(tmp.path().to_path_buf()).expect("app");
+        app.open_file(path.clone()).expect("open");
+        assert!(app.tabs[0].is_notebook());
+        assert!(!app.tabs[0].recovery_prompt_open);
+        assert_eq!(app.tabs[0].recovery_text, None);
+        assert_eq!(
+            app.status,
+            "Autosave for a.ipynb was written in a different view; not recovered"
+        );
+        assert_eq!(fs::read_to_string(&autosave).expect("kept"), raw);
+        cleanup_autosave(&path);
+    }
+
+    /// A notebook-view autosave (projected text + sidecar) is not offered to
+    /// a raw tab; both files are kept.
+    #[test]
+    fn notebook_autosave_is_not_offered_to_raw_tab() {
+        let tmp = tempdir().expect("tempdir");
+        let path = autosave_and_crash(tmp.path(), V44, ("x", "x + 1"));
+        let projected = fs::read_to_string(autosave_path_for(&path)).expect("autosave");
+        fs::write(&path, "{ not json").expect("write");
+        let mut app = App::new(tmp.path().to_path_buf()).expect("app");
+        app.open_file(path.clone()).expect("open");
+        assert!(!app.tabs[0].is_notebook());
+        assert!(!app.tabs[0].recovery_prompt_open);
+        assert_eq!(
+            app.status,
+            "Autosave for a.ipynb was written in a different view; not recovered"
+        );
+        assert_eq!(
+            fs::read_to_string(autosave_path_for(&path)).expect("kept"),
+            projected
+        );
+        assert!(nbtokens_path_for(&path).exists());
+        cleanup_autosave(&path);
+    }
+
+    /// A raw-JSON autosave replaces a projected one, so it drops the stale
+    /// sidecar and recovery then sees the raw view.
+    #[test]
+    fn raw_autosave_drops_stale_sidecar() {
+        let tmp = tempdir().expect("tempdir");
+        let path = autosave_and_crash(tmp.path(), V44, ("x", "x + 1"));
+        let mut app = App::new(tmp.path().to_path_buf()).expect("app");
+        app.open_file(path.clone()).expect("open");
+        app.handle_recovery_prompt_key(key(KeyCode::Esc))
+            .expect("cancel");
+        app.run_command_action(CommandAction::ReopenAsRawJson)
+            .expect("reopen");
+        assert!(!app.tabs[0].is_notebook());
+        edit_line(&mut app, 0, "{ ");
+        app.autosave_last_write = Instant::now()
+            .checked_sub(Duration::from_secs(10))
+            .expect("instant");
+        app.poll_autosave().expect("autosave");
+        assert!(!nbtokens_path_for(&path).exists());
+        cleanup_autosave(&path);
+    }
+
     /// Guardrail 7: reopen as raw JSON and back; refused on a dirty tab.
     #[test]
     fn reopen_as_raw_json_and_back() {

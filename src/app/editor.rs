@@ -430,12 +430,13 @@ impl App {
         self.focus = Focus::Editor;
         self.completion.reset();
         self.ensure_lsp_for_path(&path);
-        self.check_recovery_for_open_file();
         let rel = relative_path(&self.root, &path).display().to_string();
         match raw_reason {
             Some(reason) => self.set_status(format!("Opened {rel} as raw JSON: {reason}")),
             None => self.set_status(format!("Opened {rel}")),
         }
+        // After the open status, so a recovery-mismatch status stays visible.
+        self.check_recovery_for_open_file();
         Ok(())
     }
 
