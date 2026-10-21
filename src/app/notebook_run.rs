@@ -246,11 +246,27 @@ impl App {
         }
         self.notebook_runs.clear();
     }
+
+    /// Keep active runs aligned with a file-tree rename or move of the
+    /// notebook or one of its parent directories (nbconvert writes into its
+    /// cwd, which moves with the directory).
+    pub(crate) fn retarget_notebook_runs(&mut self, from: &Path, to: &Path) {
+        let retarget = |path: &Path| match path.strip_prefix(from) {
+            Ok(rest) if rest.as_os_str().is_empty() => to.to_path_buf(),
+            Ok(rest) => to.join(rest),
+            Err(_) => path.to_path_buf(),
+        };
+        for run in &mut self.notebook_runs {
+            run.path = retarget(&run.path);
+            run.tmp = retarget(&run.tmp);
+        }
+    }
 }
 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::types::PromptMode;
     use crate::util::text_to_lines;
     use std::thread::sleep;
     use tempfile::tempdir;
@@ -512,6 +528,42 @@ cp executed.json "$7""#,
         wait_for_runs(&mut app);
         assert!(app.status.starts_with("Run finished in "), "{}", app.status);
         assert_eq!(fs::read_to_string(&nb).unwrap(), EXECUTED_NB);
+    }
+
+    #[test]
+    fn run_follows_parent_directory_rename() {
+        let (_t, mut app, nb) = setup(
+            r#"echo ready > ../run.ready
+sleep 0.3
+cp ../executed.json "$7""#,
+        );
+        let root = nb.parent().unwrap().to_path_buf();
+        let old_dir = root.join("old");
+        fs::create_dir(&old_dir).unwrap();
+        let old_nb = old_dir.join("nb.ipynb");
+        fs::rename(&nb, &old_nb).unwrap();
+        app.active_tab_mut().unwrap().path = old_nb.clone();
+
+        app.run_notebook();
+        let ready = root.join("run.ready");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !ready.exists() {
+            assert!(Instant::now() < deadline, "fake run never entered its cwd");
+            sleep(Duration::from_millis(20));
+        }
+        app.apply_prompt(
+            PromptMode::Rename {
+                target: old_dir.clone(),
+            },
+            "new".to_string(),
+        )
+        .unwrap();
+        wait_for_runs(&mut app);
+
+        let new_nb = root.join("new/nb.ipynb");
+        assert_eq!(fs::read_to_string(&new_nb).unwrap(), EXECUTED_NB);
+        assert!(!run_tmp_path(&new_nb).exists());
+        assert!(app.status.starts_with("Run finished in "), "{}", app.status);
     }
 
     #[test]
