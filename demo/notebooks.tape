@@ -23,18 +23,18 @@ Sleep 200ms
 Type@1ms "./target/release/lazyide $DEMO_DIR"
 Enter
 Sleep 2s
-Show
-
-# Start: file tree with the notebook
-Sleep 600ms
-
-# Open the notebook: cells as plain text, one marker per cell
+# Open the notebook off camera, so the first frame (the social preview
+# thumbnail) is the notebook itself: cells as plain text, one marker per cell
 Ctrl+o
 Sleep 250ms
 Type "sales"
 Sleep 250ms
 Enter
-Sleep 1200ms
+Sleep 800ms
+Show
+
+# Start on the opened notebook
+Sleep 1500ms
 
 # Jump to the data cell; once the "Opened" message clears, the status bar
 # summarises the cell's outputs (text/html)
@@ -65,7 +65,11 @@ Sleep 300ms
 Enter
 Sleep 400ms
 Type "forecast.q4.sum("
-Sleep 700ms
+Sleep 300ms
+# Step past the auto-paired ")" and add the blank line before the next cell
+Right
+Enter
+Sleep 500ms
 Ctrl+S
 Sleep 1000ms
 
