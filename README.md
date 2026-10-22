@@ -94,6 +94,8 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 
 ### Notebooks
 
+![notebooks demo](demo/notebooks.gif)
+
 A Jupyter notebook (`.ipynb`, nbformat 4) opens as readable cell text in a normal tab, in the jupytext "percent" format:
 
 ```
@@ -263,6 +265,7 @@ Requires Rust 2024 edition.
 
 - [Architecture](docs/ARCHITECTURE.md) — module structure, data flow, rendering pipeline
 - [Notebook design](docs/notebooks-design.md) — how `.ipynb` files are projected, saved and kept safe
+- [Demos](demo/README.md) — recorded demos (GIF/MP4) and how to re-record them
 - [Contributing](CONTRIBUTING.md) — themes, bug reports, code contributions
 
 ## Acknowledgements
