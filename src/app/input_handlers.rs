@@ -226,14 +226,12 @@ impl App {
                 if mods.contains(KeyModifiers::CONTROL) && !mods.contains(KeyModifiers::ALT) =>
             {
                 self.pending = PendingAction::None;
-                self.save_file()?;
-                self.close_file();
+                self.save_and_close_file()?;
                 Ok(true)
             }
             (PendingAction::ClosePrompt, KeyModifiers::NONE, KeyCode::Enter) => {
                 self.pending = PendingAction::None;
-                self.save_file()?;
-                self.close_file();
+                self.save_and_close_file()?;
                 Ok(true)
             }
             (PendingAction::ClosePrompt, KeyModifiers::NONE, KeyCode::Esc) => {
@@ -245,6 +243,30 @@ impl App {
             | (PendingAction::ClosePrompt, KeyModifiers::NONE, KeyCode::Char('C')) => {
                 self.pending = PendingAction::None;
                 self.set_status("Close canceled");
+                Ok(true)
+            }
+            (
+                PendingAction::NotebookReformat { then_close },
+                KeyModifiers::NONE,
+                KeyCode::Char('y' | 'Y'),
+            ) => {
+                let then_close = *then_close;
+                self.pending = PendingAction::None;
+                if let Some(tab) = self.active_tab_mut() {
+                    tab.reformat_confirmed = true;
+                }
+                if then_close {
+                    self.save_and_close_file()?;
+                } else {
+                    self.save_file()?;
+                }
+                Ok(true)
+            }
+            (PendingAction::NotebookReformat { .. }, KeyModifiers::NONE, KeyCode::Char('n'))
+            | (PendingAction::NotebookReformat { .. }, KeyModifiers::NONE, KeyCode::Char('N'))
+            | (PendingAction::NotebookReformat { .. }, KeyModifiers::NONE, KeyCode::Esc) => {
+                self.pending = PendingAction::None;
+                self.set_status("Save canceled");
                 Ok(true)
             }
             (PendingAction::Delete(path), mods, KeyCode::Char('d' | 'D'))
@@ -398,7 +420,11 @@ impl App {
         }
 
         if let Some(action) = self.keybinds.lookup(&key, KeyScope::Editor) {
-            return self.run_key_action(action);
+            // Notebook-only keys fall through to the editor on other tabs.
+            let notebook_tab = self.active_tab().is_some_and(|t| t.is_notebook());
+            if notebook_tab || !action.is_notebook_only() {
+                return self.run_key_action(action);
+            }
         }
 
         let modified = self
@@ -415,7 +441,9 @@ impl App {
     pub(crate) fn run_key_action(&mut self, action: KeyAction) -> io::Result<()> {
         match action {
             // Global
-            KeyAction::Save => self.save_file()?,
+            KeyAction::Save => {
+                self.save_file()?;
+            }
             KeyAction::CloseTab => {
                 if !self.tabs.is_empty() {
                     if self.is_dirty() {
@@ -608,6 +636,9 @@ impl App {
                 self.sync_editor_scroll_guess();
                 self.set_status("End of file");
             }
+            KeyAction::NextCell => self.notebook_next_cell(),
+            KeyAction::PrevCell => self.notebook_prev_cell(),
+            KeyAction::InsertCellBelow => self.notebook_insert_cell_below(),
         }
         Ok(())
     }
@@ -837,10 +868,16 @@ impl App {
     }
 
     pub(crate) fn handle_conflict_prompt_key(&mut self, key: KeyEvent) -> io::Result<()> {
+        // Notebook tabs keep their old doc as the save base on K/D/Esc, so
+        // the next save overwrites the disk version.
+        let notebook = self.active_tab().is_some_and(|t| t.is_notebook());
+        let kept_notebook = "Kept local version; saving will overwrite the notebook on disk";
         match (key.modifiers, key.code) {
             (_, KeyCode::Char('r')) | (_, KeyCode::Char('R')) => {
                 let disk = self.active_tab().and_then(|t| t.conflict_disk_text.clone());
-                if let Some(disk) = disk {
+                if notebook && let Some(disk) = disk {
+                    self.reload_notebook_from_conflict(disk);
+                } else if let Some(disk) = disk {
                     let lines = text_to_lines(&disk);
                     let cursor = self.tabs[self.active_tab].editor.cursor();
                     self.replace_editor_text(lines, cursor);
@@ -865,7 +902,11 @@ impl App {
                     tab.conflict_prompt_open = false;
                     tab.conflict_disk_text = None;
                 }
-                self.set_status("Keeping local edits");
+                self.set_status(if notebook {
+                    kept_notebook
+                } else {
+                    "Keeping local edits"
+                });
             }
             (_, KeyCode::Char('d')) | (_, KeyCode::Char('D')) | (_, KeyCode::Esc) => {
                 if let Some(tab) = self.active_tab_mut() {
@@ -875,7 +916,11 @@ impl App {
                     tab.conflict_prompt_open = false;
                     tab.conflict_disk_text = None;
                 }
-                self.set_status("Conflict deferred");
+                self.set_status(if notebook {
+                    kept_notebook
+                } else {
+                    "Conflict deferred"
+                });
             }
             _ => {}
         }

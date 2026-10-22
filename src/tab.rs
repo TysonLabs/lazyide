@@ -1,9 +1,12 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ratatui_textarea::TextArea;
 
 use crate::lsp_client::LspDiagnostic;
+use crate::notebook::NotebookDoc;
+use crate::syntax::{SyntaxLang, comment_start_for_lang, syntax_lang_for_path};
+use crate::util::comment_prefix_for_path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum GitLineStatus {
@@ -69,4 +72,43 @@ pub(crate) struct Tab {
     pub(crate) recovery_prompt_open: bool,
     pub(crate) recovery_text: Option<String>,
     pub(crate) git_line_status: Vec<GitLineStatus>,
+    /// Set when this tab shows a projected notebook; None for raw text (incl. .ipynb fallback).
+    pub(crate) notebook: Option<NotebookDoc>,
+    /// The user accepted the notebook JSON reformat prompt for this tab; kept for the tab's lifetime.
+    pub(crate) reformat_confirmed: bool,
+    /// The recovery prompt's notebook text lost its cell tokens (the notebook
+    /// changed since the autosave), so no outputs re-attach to it.
+    pub(crate) recovery_tokens_stale: bool,
+    /// An autosave written in the other view (raw vs notebook) was not
+    /// offered on open. This tab never deletes or overwrites it.
+    pub(crate) keep_autosave: bool,
+}
+
+/// Syntax language of a tab's text: the notebook's kernel language for a
+/// notebook tab, the path's extension otherwise. Shared by `Tab::syntax_lang`
+/// and `open_file_as` (which needs it before the `Tab` exists).
+pub(crate) fn tab_syntax_lang(path: &Path, notebook: Option<&NotebookDoc>) -> SyntaxLang {
+    match notebook {
+        Some(doc) => doc.lang(),
+        None => syntax_lang_for_path(Some(path)),
+    }
+}
+
+impl Tab {
+    pub(crate) fn is_notebook(&self) -> bool {
+        self.notebook.is_some()
+    }
+
+    pub(crate) fn syntax_lang(&self) -> SyntaxLang {
+        tab_syntax_lang(&self.path, self.notebook.as_ref())
+    }
+
+    /// Line-comment prefix for toggle comment: the notebook language's prefix
+    /// on a notebook tab, the path-based prefix otherwise.
+    pub(crate) fn comment_prefix(&self) -> Option<&'static str> {
+        match &self.notebook {
+            Some(doc) => comment_start_for_lang(doc.lang()),
+            None => comment_prefix_for_path(&self.path),
+        }
+    }
 }

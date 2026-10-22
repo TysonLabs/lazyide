@@ -1,3 +1,4 @@
+use super::notebook_io::{is_ipynb_path, write_nbtokens_sidecar};
 use super::{
     App, CompletionState, ContextMenuState, DiffViewState, KeybindEditorState, SearchResultsState,
     SplitDirection,
@@ -19,15 +20,16 @@ use ratatui::layout::Rect;
 use crate::keybinds::{KeyAction, load_keybindings};
 use crate::lsp_client::resolve_rust_analyzer_bin;
 use crate::persistence::{
-    PersistedState, autosave_path_for, load_persisted_state, save_persisted_state,
+    PersistedState, autosave_path_for, load_persisted_state, nbtokens_path_for,
+    save_persisted_state,
 };
-use crate::syntax::syntax_lang_for_path;
+use crate::syntax::SyntaxLang;
 use crate::tab::{FoldRange, Tab};
 use crate::theme::{Theme, load_themes};
 use crate::types::{CommandAction, Focus, PendingAction, PromptMode, PromptState};
 use crate::util::{
-    command_action_label, compute_fold_ranges, compute_git_change_summary,
-    compute_git_file_statuses, detect_git_branch, relative_path, spawn_git_refresh, text_to_lines,
+    command_action_label, compute_git_change_summary, compute_git_file_statuses,
+    compute_tab_fold_ranges, detect_git_branch, relative_path, spawn_git_refresh, text_to_lines,
     wrap_segments_for_line,
 };
 
@@ -164,6 +166,9 @@ impl App {
             git_refresh_in_flight: false,
             git_thread_handle: None,
             cached_file_list: Vec::new(),
+            notebook_runs: Vec::new(),
+            last_run_result: Vec::new(),
+            jupyter_cmd: vec!["jupyter".to_string()],
         };
         app.git_branch = detect_git_branch(&app.root);
         app.git_file_statuses = compute_git_file_statuses(&app.root);
@@ -279,9 +284,12 @@ impl App {
                     self.set_status("Git refresh thread panicked");
                 }
                 let root = self.root.clone();
-                let tab_paths: Vec<(PathBuf, usize)> = self
+                let tab_paths: Vec<(PathBuf, usize, bool)> = self
                     .all_tabs()
-                    .map(|tab| (tab.path.clone(), tab.editor.lines().len()))
+                    .map(|tab| {
+                        let lines = tab.editor.lines().len();
+                        (tab.path.clone(), lines, tab.is_notebook())
+                    })
                     .collect();
                 let (tx, rx) = mpsc::channel();
                 self.git_result_rx = Some(rx);
@@ -321,6 +329,9 @@ impl App {
         };
         if self.is_dirty() || !path.exists() {
             return Ok(());
+        }
+        if self.tabs[self.active_tab].is_notebook() {
+            return self.reload_pristine_notebook(&path);
         }
         let bytes = fs::read(&path)?;
         let disk_text = String::from_utf8_lossy(&bytes).to_string();
@@ -362,6 +373,12 @@ impl App {
         self.active_tab().map(|t| &t.path)
     }
 
+    /// Syntax language of the active tab (Plain with no tab open).
+    pub(crate) fn active_syntax_lang(&self) -> SyntaxLang {
+        self.active_tab()
+            .map_or(SyntaxLang::Plain, Tab::syntax_lang)
+    }
+
     pub(crate) fn is_dirty(&self) -> bool {
         self.active_tab().is_some_and(|t| t.dirty)
     }
@@ -382,6 +399,7 @@ impl App {
             self.active_tab = idx;
             self.completion.reset();
             self.focus = Focus::Editor;
+            self.reconcile_activated_notebook();
         }
     }
 
@@ -511,7 +529,22 @@ impl App {
             CommandAction::MoveTabToOtherPane,
             CommandAction::ClosePane,
             CommandAction::ToggleMinimap,
+            CommandAction::NotebookNextCell,
+            CommandAction::NotebookPrevCell,
+            CommandAction::NotebookInsertCellBelow,
+            CommandAction::NotebookToggleCellType,
+            CommandAction::NotebookClearOutputs,
+            CommandAction::ReopenAsRawJson,
+            CommandAction::ReopenAsNotebook,
+            CommandAction::NotebookRunAll,
+            CommandAction::NotebookStopRun,
         ];
+        // Notebook entries only where they apply, so a user who never opens a
+        // notebook sees the same palette as before notebooks existed.
+        let notebook_tab = self.active_tab().is_some_and(Tab::is_notebook);
+        let raw_ipynb_tab = self
+            .active_tab()
+            .is_some_and(|t| !t.is_notebook() && is_ipynb_path(&t.path));
         // Every whitespace-separated word must appear in the label, so
         // "split vert" finds "Split Editor Vertically".
         let words: Vec<String> = self
@@ -521,6 +554,19 @@ impl App {
             .collect();
         self.menu_results = all
             .into_iter()
+            .filter(|a| match a {
+                CommandAction::NotebookNextCell
+                | CommandAction::NotebookPrevCell
+                | CommandAction::NotebookInsertCellBelow
+                | CommandAction::NotebookToggleCellType
+                | CommandAction::NotebookClearOutputs
+                | CommandAction::NotebookRunAll
+                | CommandAction::ReopenAsRawJson => notebook_tab,
+                // A run outlives its tab, so Stop stays reachable while one runs.
+                CommandAction::NotebookStopRun => notebook_tab || !self.notebook_runs.is_empty(),
+                CommandAction::ReopenAsNotebook => raw_ipynb_tab,
+                _ => true,
+            })
             .filter(|a| {
                 let label = command_action_label(*a).to_ascii_lowercase();
                 words.iter().all(|w| label.contains(w.as_str()))
@@ -591,6 +637,15 @@ impl App {
             CommandAction::MoveTabToOtherPane => self.move_tab_to_other_pane(),
             CommandAction::ClosePane => self.close_pane(),
             CommandAction::ToggleMinimap => self.toggle_minimap(),
+            CommandAction::NotebookNextCell => self.notebook_next_cell(),
+            CommandAction::NotebookPrevCell => self.notebook_prev_cell(),
+            CommandAction::NotebookInsertCellBelow => self.notebook_insert_cell_below(),
+            CommandAction::NotebookToggleCellType => self.notebook_toggle_cell_type(),
+            CommandAction::NotebookClearOutputs => self.notebook_clear_outputs(),
+            CommandAction::ReopenAsRawJson => self.reopen_active_tab(false)?,
+            CommandAction::ReopenAsNotebook => self.reopen_active_tab(true)?,
+            CommandAction::NotebookRunAll => self.run_notebook(),
+            CommandAction::NotebookStopRun => self.stop_notebook_run(),
         }
         Ok(())
     }
@@ -612,7 +667,7 @@ impl App {
             return Ok(());
         }
         for tab in self.all_tabs() {
-            if !tab.dirty {
+            if !tab.dirty || tab.keep_autosave {
                 continue;
             }
             let autosave = autosave_path_for(&tab.path);
@@ -620,6 +675,13 @@ impl App {
                 fs::create_dir_all(parent)?;
             }
             fs::write(&autosave, tab.editor.lines().join("\n"))?;
+            if let Some(doc) = &tab.notebook {
+                write_nbtokens_sidecar(&tab.path, doc)?;
+            } else if is_ipynb_path(&tab.path) {
+                // A raw-JSON autosave replaced any projected one: drop its
+                // sidecar so recovery sees the raw view.
+                let _ = fs::remove_file(nbtokens_path_for(&tab.path));
+            }
         }
         self.autosave_last_write = Instant::now();
         Ok(())
@@ -631,9 +693,24 @@ impl App {
         };
         let path = tab.path.clone();
         let autosave = autosave_path_for(&path);
-        let Ok(recovered) = fs::read_to_string(autosave) else {
+        let Ok(mut recovered) = fs::read_to_string(autosave) else {
             return;
         };
+        // A notebook tab autosaves projected cell text plus a `.nbtokens`
+        // sidecar; a raw tab autosaves the buffer alone. Offer an autosave only
+        // to a tab in the same view, and keep both files on a mismatch.
+        let notebook_tab = self.tabs[self.active_tab].is_notebook();
+        if nbtokens_path_for(&path).exists() != notebook_tab {
+            self.tabs[self.active_tab].keep_autosave = true;
+            self.set_status(format!(
+                "Autosave for {} was written in a different view; not recovered",
+                relative_path(&self.root, &path).display()
+            ));
+            return;
+        }
+        if notebook_tab {
+            recovered = self.recover_notebook_tokens(recovered);
+        }
         let current = self.tabs[self.active_tab].editor.lines().join("\n");
         if recovered != current
             && let Some(tab) = self.active_tab_mut()
@@ -644,8 +721,9 @@ impl App {
     }
 
     pub(crate) fn clear_autosave_for_open_file(&mut self) {
-        if let Some(tab) = self.active_tab() {
+        if let Some(tab) = self.active_tab().filter(|t| !t.keep_autosave) {
             let _ = fs::remove_file(autosave_path_for(&tab.path));
+            let _ = fs::remove_file(nbtokens_path_for(&tab.path));
         }
     }
 
@@ -657,6 +735,9 @@ impl App {
             return Ok(());
         }
         let path = tab.path.clone();
+        if tab.is_notebook() {
+            return self.flag_notebook_conflict(&path);
+        }
         let disk = fs::read_to_string(&path)?;
         let current = self.tabs[self.active_tab].editor.lines().join("\n");
         let snapshot = self.tabs[self.active_tab]
@@ -684,9 +765,8 @@ impl App {
         let Some(tab) = self.active_tab() else {
             return;
         };
-        let lang = syntax_lang_for_path(Some(tab.path.as_path()));
         let (fold_ranges, bracket_depths) =
-            compute_fold_ranges(self.tabs[self.active_tab].editor.lines(), lang);
+            compute_tab_fold_ranges(tab.editor.lines(), tab.syntax_lang(), tab.is_notebook());
         let tab = &mut self.tabs[self.active_tab];
         tab.fold_ranges = fold_ranges;
         tab.bracket_depths = bracket_depths;

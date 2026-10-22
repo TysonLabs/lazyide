@@ -501,6 +501,10 @@ mod lsp_and_struct_tests {
             recovery_prompt_open: false,
             recovery_text: None,
             git_line_status: Vec::new(),
+            notebook: None,
+            reformat_confirmed: false,
+            recovery_tokens_stale: false,
+            keep_autosave: false,
         };
         assert_eq!(tab.path, PathBuf::from("/test/file.rs"));
         assert!(!tab.is_preview);
@@ -544,6 +548,10 @@ mod lsp_and_struct_tests {
             recovery_prompt_open: false,
             recovery_text: None,
             git_line_status: Vec::new(),
+            notebook: None,
+            reformat_confirmed: false,
+            recovery_tokens_stale: false,
+            keep_autosave: false,
         };
         assert!(tab.is_preview);
         assert!(tab.dirty);

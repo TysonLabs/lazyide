@@ -131,7 +131,9 @@ impl App {
         if self.prompt.is_some()
             || matches!(
                 self.pending,
-                PendingAction::ClosePrompt | PendingAction::Delete(_)
+                PendingAction::ClosePrompt
+                    | PendingAction::Delete(_)
+                    | PendingAction::NotebookReformat { .. }
             )
             || self
                 .active_tab()
@@ -155,6 +157,9 @@ impl App {
                 } else if matches!(self.pending, PendingAction::ClosePrompt) {
                     self.pending = PendingAction::None;
                     self.set_status("Close cancelled");
+                } else if matches!(self.pending, PendingAction::NotebookReformat { .. }) {
+                    self.pending = PendingAction::None;
+                    self.set_status("Save canceled");
                 } else if let Some(tab) = self.active_tab_mut() {
                     if tab.recovery_prompt_open {
                         tab.recovery_prompt_open = false;

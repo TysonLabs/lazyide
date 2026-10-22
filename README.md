@@ -70,7 +70,7 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Syntax highlighting** — Rust, Python, JS/TS, Go, PHP, CSS/SCSS, HTML/XML, Shell, JSON/TOML/YAML, Markdown
 - **Code folding** — brace-based (Rust, JS, Go), indentation-based (Python), tag-based (HTML/XML)
 - **Bracket pair colorization** — `{}` `()` `[]` colored by nesting depth
-- **Find & replace** — regex search in file, ripgrep-powered project search
+- **Find & replace** — regex search in file, ripgrep-powered project search. Jupyter notebooks (`.ipynb`, any letter case) are searched by their cell text, so a hit jumps to the matching line of the cell view; outputs and metadata are not searched. A notebook that cannot be shown as cells is searched as raw JSON. At most 500 notebooks are searched per query; the status bar says how many were skipped. If ripgrep reports an error (for example an invalid regex), the status bar shows it
 - **Word wrap** — toggle with `Alt+Z`, with full cursor/selection/mouse support
 - **Horizontal scrolling** — `Shift+scroll` when word wrap is off
 
@@ -87,10 +87,61 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 - **Tabbed editing** — dedicated tab row, preview tabs, sticky tabs, dirty indicators
 - **Split panes** — two editor panes side by side or stacked, each with its own tab group; move tabs between them, drag the divider
 - **Minimap** — condensed file overview at the editor's right edge with the viewport highlighted; click or drag to scroll, `Alt+I` to toggle
-- **Status bar** — focus mode, git branch with +/- counts, file breadcrumbs, cursor position, diagnostic counts
-- **File tree** — folders-first sorting, expand/collapse, context menus, resizable divider
+- **Status bar** — focus mode, git branch with +/- counts, file breadcrumbs, cursor position, diagnostic counts; on a notebook tab, the cursor's cell (see *Notebook commands*)
+- **File tree** — folders-first sorting, expand/collapse, context menus, resizable divider. A rename that switches an open tab between notebook view and plain text (adding `.ipynb` to a file, or removing it from a notebook shown as cells) reopens that tab; if the tab has unsaved changes, the rename is refused ("Save x.py before renaming"). An `.ipynb` file shown as raw JSON keeps its tab when renamed
 - **Command palette** — `Ctrl+P` for quick access to all actions
 - **Autosave & recovery** — buffers saved every 2s, crash recovery on reopen
+
+### Notebooks
+
+A Jupyter notebook (`.ipynb`, nbformat 4) opens as readable cell text in a normal tab, in the jupytext "percent" format:
+
+```
+# %% #k3x9qa
+import pandas as pd
+
+# %% [markdown] #p0d7mz
+# # Title
+# Some *markdown* text.
+```
+
+- **Cells** — each cell starts with a `# %%` marker line (`# %% [markdown]`, `# %% [raw]`). Markdown and raw lines carry a `# ` prefix. Type a new `# %%` line to add a cell, delete a cell's lines to remove it. Text above the first marker becomes a code cell (it gets a marker line on save).
+- **Cell tokens** — the `#k3x9qa` at the end of a marker is the cell's identity for this tab. It is not saved to the file. Keep it when you edit or move a cell, so the cell keeps its outputs. A cell without a token (or with a token from another notebook, or whose type changed) saves as a new cell. On save, new cells get a token on their marker line; each inserted token is one extra undo step, so undo after a save first removes the tokens, then your edits.
+- **What is kept** — saving writes back only the cells you changed. Every other byte stays as it was: cell ids, metadata, outputs, execution counts, number formatting and key order. A save with no edits does not rewrite the file. An edited cell keeps its (now stale) outputs, as in Jupyter.
+- **Edited cells are normalized** — a changed cell's source is written with LF line endings, in the list form (unless the cell was a single string), with no trailing newline unless the last line is blank.
+- **Malformed markers** — a line that starts with `# %%` but is not a valid marker (for example a half-typed `# %% #`) makes the save fail with "Malformed cell marker at line N"; nothing is written.
+- **Reformat prompt** — if the file's JSON whitespace is not Jupyter's own layout (for example indent 2), the first save that changes it asks first. Cell contents and outputs are kept either way.
+- **Fallback** — a file that is not a valid nbformat 4 notebook (or whose cell text contains a `# %%` line) opens as raw JSON, with the reason in the status bar ("Opened x.ipynb as raw JSON: …").
+- **Changes on disk** — changes are checked by the watcher and again immediately before a notebook save, so a save cannot race ahead of watcher debounce. A tab without unsaved edits reloads. With unsaved edits, a change of outputs, metadata or execution counts only is adopted without a prompt ("Notebook outputs updated on disk") and the next save keeps both. When the change is the result just written by **Notebook: Run all**, the watcher keeps the run's completion status instead. A notebook tab that was not active when its file changed (for example a run finished while you were in another tab or pane) is checked when you switch back to it. Any other change asks: `R` loads the disk version, `K`/`D`/`Esc` keep your version, and the next save overwrites the notebook on disk.
+- **Autosave & recovery** — recovery re-attaches cell outputs only if the notebook file is unchanged since the autosave; otherwise the text is recovered as new cells, and the prompt says outputs will not be re-attached. An autosave written in the other view (cell view vs raw JSON, for example one from before notebook support) is not offered; the status says so and the autosave file is kept (that tab does not autosave its own edits).
+- **Reopen as raw JSON** — the palette commands "Reopen as raw JSON" and "Reopen as notebook" switch the current tab between the cell view and the plain JSON text (to edit metadata by hand). Save first; a tab with unsaved changes is not reopened. If an autosave was not recovered because it was written in the other view, reopening in that view offers it.
+- **Palette** — the notebook entries ("Notebook: …" and "Reopen as raw JSON") are listed only when the current tab is a notebook, and "Reopen as notebook" only on an `.ipynb` tab shown as raw JSON. "Notebook: Stop run" is also listed while a run is active. Other tabs show the usual palette.
+
+#### Notebook commands
+
+These work on a notebook shown as cells. On any other tab the keys do what they did before.
+
+| Command | Key | Palette entry |
+|---|---|---|
+| Next cell: the first line after the next marker | `Alt+Down` | Notebook: Next cell |
+| Previous cell: the top of the current cell, or of the cell above if already there | `Alt+Up` | Notebook: Previous cell |
+| Insert an empty code cell below the current cell | `Alt+C` | Notebook: Insert cell below |
+| Toggle the current cell between code and markdown (a raw cell becomes code) | — | Notebook: Toggle markdown/code |
+| Clear all outputs | — | Notebook: Clear all outputs |
+
+- Inserts and toggles are normal edits: `Ctrl+Z` undoes them (a toggle takes two undo steps). An inserted cell gets its token on save, like any new cell.
+- A toggled cell changes type, so it saves as a new cell and a code cell's outputs are dropped. A toggle is refused when a line would become a cell marker (for example the `%%time` magic).
+- **Clear all outputs** marks the tab dirty. On the next save every code cell gets `outputs: []` and `execution_count: null`; markdown and raw cells are unchanged. Reload the file to cancel. `Ctrl+Z` does not cancel it.
+- **Status bar:** the breadcrumbs end with the cursor's cell, numbered as on disk: `analysis.ipynb › cell 4/12 · [7] · text, image/png` (execution count and output types), `cell 5/12 · [8] · error: KeyError`, `cell 6/12 · edited, outputs stale` (the cell changed since it ran), or `new cell` (not saved yet, or its type changed). A status message shows first, as for any tab.
+- **macOS Terminal:** `Alt+Up`, `Alt+Down` and `Alt+C` need "Use Option as Meta key" (Settings > Profiles > Keyboard). Without it, use the palette entries. The keys can be remapped as `next_cell`, `prev_cell` and `insert_cell_below`.
+
+#### Run notebook
+
+- **Notebook: Run all (nbconvert)** (command palette only) runs the whole notebook in the current tab with `jupyter nbconvert --to notebook --execute --allow-errors`, in the notebook's directory, with the notebook's own kernel. It needs `jupyter nbconvert` and `ipykernel` (`pip install nbconvert ipykernel`). There is no single-cell run and no live kernel.
+- Save first: a tab with unsaved changes is refused ("Save before running"). One run per notebook at a time; the status bar shows "Running x.ipynb…" while it runs.
+- `--allow-errors` keeps going after a failing cell and writes its traceback, so the status reports the first failing cell ("Run finished: cell 5 raised KeyError") or "Run finished in 12s". A run that fails to start (for example a missing kernel) shows the error and leaves the notebook unchanged.
+- The result replaces the notebook on disk, and the open tab picks up the new outputs. If the notebook changed on disk during the run, it is not overwritten: the result is saved as `x.executed.ipynb` next to it (or `x.executed-2.ipynb`, `-3`, ... if that file exists; an earlier result is never overwritten).
+- **Notebook: Stop run** kills the run of the current notebook (or the only active run) and discards its partial result. With several runs active, open the notebook to stop first. A run continues if its tab is closed, and its result is still applied and reported. Quitting lazyide stops active runs.
 
 ## Keyboard
 
@@ -140,6 +191,8 @@ After installing, run `lazyide --setup` to detect and install optional tools (ru
 | `Shift+Alt+Down` / `Up` | Duplicate line |
 | `F3` / `Shift+F3` | Find next / previous |
 | `Alt+N` / `Alt+P` | Next / previous git change |
+| `Alt+Down` / `Alt+Up` | Next / previous notebook cell (notebook tabs only) |
+| `Alt+C` | Insert notebook cell below (notebook tabs only) |
 | `PageUp` / `PageDown` | Scroll page |
 | `Ctrl+Home` / `Ctrl+End` | Start / end of file |
 
@@ -204,10 +257,12 @@ Requires Rust 2024 edition.
 | [rust-analyzer](https://rust-analyzer.github.io/manual.html#installation) | LSP completions, diagnostics, go-to-definition | `lazyide --setup` |
 | [ripgrep](https://github.com/BurntSushi/ripgrep#installation) | Project-wide search | `lazyide --setup` |
 | git | Branch display, gutter markers | System package manager |
+| jupyter nbconvert + ipykernel | Run notebook | `pip install nbconvert ipykernel` |
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — module structure, data flow, rendering pipeline
+- [Notebook design](docs/notebooks-design.md) — how `.ipynb` files are projected, saved and kept safe
 - [Contributing](CONTRIBUTING.md) — themes, bug reports, code contributions
 
 ## Acknowledgements

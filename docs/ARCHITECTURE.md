@@ -16,24 +16,28 @@ src/
     editor.rs          File open/save/close, clipboard, fold, scroll, comment, dedent
     file_tree.rs       Tree build, navigation, file create/rename/delete
     lsp.rs             LSP lifecycle, completion, diagnostics, go-to-definition
-    search.rs          Find/replace in file, project search (ripgrep)
+    search.rs          Find/replace in file, project search (ripgrep; notebooks searched by projected cell text)
     git_diff.rs        Diff view open/scroll/hunk keys, next/previous change jumps
     panes.rs           Two-pane split: swap-based focus, split/close/move, layout, divider drag
+    notebook_cmds.rs   Notebook commands: next/previous cell, insert cell, toggle code/markdown, clear outputs
+    notebook_io.rs     Notebook tabs: save (rebuild + token insertion), watcher reload/adopt/conflict, autosave token sidecar, reopen as raw/notebook
+    notebook_run.rs    Run notebook / Stop run: nbconvert child process, result classification
   ui/
     mod.rs             Main draw() function (layout, tree pane, tab row, editor pane)
-    status_bar.rs      Structured status bar (mode, branch, breadcrumbs, cursor, diagnostics)
+    status_bar.rs      Structured status bar (mode, branch, breadcrumbs + notebook cell summary, cursor, diagnostics)
     overlays.rs        Overlays: command palette, theme browser, help, prompts, etc.
     helpers.rs         UI utilities (centered_rect, label helpers, indent guides, horizontal span clipping)
   keybinds.rs          KeyAction enum, KeyBind, KeyBindings, JSON load/save
   diff.rs              Unified diff -> side-by-side rows (FileDiff/DiffRow), change-jump helper
   minimap.rs           Minimap math: lines per row, bar width, centered scroll
+  notebook.rs          Jupyter .ipynb projection to percent-format cell text, identity tokens, raw-value writer (fixtures in notebook/testdata/)
   types.rs             Focus, PendingAction, PromptMode, CommandAction enums
   tab.rs               Tab struct (incl. editor_scroll_col for horizontal scroll), FoldRange, ProjectSearchHit, GitLineStatus, GitFileStatus, GitChangeSummary
   tree_item.rs         TreeItem struct
   theme.rs             Theme structs, color parsing, theme loading
   syntax.rs            SyntaxLang, highlight_line(), keyword lists
   lsp_client.rs        LspClient (JSON-RPC over stdin/stdout), rust-analyzer spawning
-  persistence.rs       PersistedState, state file paths, autosave paths
+  persistence.rs       PersistedState, state file paths, autosave paths (+ notebook `.nbtokens` sidecar)
   util.rs              Fold computation, fuzzy scoring, path helpers, geometry, git diff/status parsing
 ```
 
@@ -68,10 +72,29 @@ lib.rs: run_app()
 `handle_key()` in `app/input.rs` routes events top-to-bottom by priority:
 
 1. **Modal overlays** (keybind editor, file picker, prompts, completion, search results, context menus, theme browser, command palette, help) — first open modal wins
-2. **Pending actions** (quit confirmation, delete confirmation)
+2. **Pending actions** (`PendingAction`: quit confirmation, close prompt, delete confirmation, notebook reformat prompt)
 3. **Global keybinds** — `keybinds.lookup(key, Global)` -> `run_key_action()`
 4. **Non-remappable keys** (Esc, Tab for focus switch, Delete in tree)
 5. **Focus-specific** — `Focus::Tree` -> `handle_tree_key()`, `Focus::Editor` -> `handle_editor_key()`
+
+The notebook keys (`KeyAction::is_notebook_only()`: next/previous cell, insert cell) run only on a notebook tab. On any other tab `handle_editor_key()` skips them and the key goes on to the textarea, as if unbound. They are last in `KeyAction::all()`, so a user binding on the same key wins the lookup.
+
+Every pending action has key handling in `handle_pending_key()` (`app/input_handlers.rs`) and a status hint in `util::pending_hint`. The modal ones (close prompt, delete, notebook reformat) also have a dialog in `ui/overlays.rs` and are mouse modals in `handle_mouse()` (a click outside cancels them). Quit is status-only: no dialog and no mouse modal.
+
+**Save flow.** `save_file()` returns `SaveOutcome`: `Saved` (the buffer is on disk), `Deferred` (nothing written yet; a prompt asks first) or `Failed` (nothing written, including "No file open"; the status says why). I/O errors stay `Err`. The Save key and the palette Save only save. The close prompt (Enter / Ctrl+S) goes through `save_and_close_file()`, which closes the tab only on `Saved`; on `Deferred` it sets `then_close` on the pending `NotebookReformat` prompt. That prompt asks before a save changes a notebook's JSON whitespace: `y` sets the tab's `reformat_confirmed` (kept for the tab's lifetime), saves, and closes only if `then_close` and the save returned `Saved`; `n` / Esc leaves the tab open and dirty.
+
+**Run notebook.** `run_notebook()` (palette only) refuses a non-notebook or dirty tab and a second run for the same path, records the disk digest, and spawns `nbconvert_command()` (program from `App::jupyter_cmd`, `["jupyter"]` by default; tests swap in a fake script). The `Child` lives in `App::notebook_runs`, not on the tab, so a run outlives its tab; a thread drains stderr. `poll_notebook_runs()` in the event loop calls `try_wait()` and classifies the exit: stopped (delete the temp file), non-zero (last stderr line, delete the temp file), success with an unchanged disk digest (rename `.<name>.lazyide-run.ipynb` over the notebook; the fs watcher then reloads it), or success with a changed digest (atomically keep it at the first name that can be created without replacement: `<name>.executed.ipynb`, `<name>.executed-2.ipynb`, ...; `keep_as_unused_executed()`). `stop_notebook_run()` stops the active tab's run, or the only run; with several runs and none for the active tab it only reports that. File-tree rename and move retarget active runs (`retarget_notebook_runs()`). The success status reads `error_cells()` from the written file, never the exit code. `App::drop` kills active runs.
+
+**Rename and notebook mode.** A tab's notebook mode (`tab.notebook.is_some()`) is decided when the file opens. Before a tree rename touches disk, `tabs_changing_notebook_mode()` finds open tabs (both panes) at or under the target whose mode the new name would change (to or from an `.ipynb` extension, case-insensitive; `.ipynb` to `.ipynb` keeps the mode). If any is dirty, the rename is refused with "Save <name> before renaming". After the rename, the affected clean tabs are closed and reopened in the same pane and slot, keeping the active tab and focus. Move keeps the file name, so it never changes the mode.
+
+**Notebook data flow.** `notebook.rs` is pure (no `App`, no filesystem); `app/notebook_io.rs` wires it in, and every branch is gated on `tab.notebook.is_some()`, never on the extension.
+- *Open*: `open_file_as` calls `notebook::project()` for a `.ipynb`. `Ok(doc)` puts `doc.projected_text()` in the editor and the doc on the tab; `Err` opens the raw JSON with the status "Opened x.ipynb as raw JSON: <reason>". For a notebook tab, `open_disk_snapshot` holds the raw file text (the conflict paths compare raw bytes, not buffer text).
+- *Save*: `save_file` -> `save_notebook()` first repeats the watcher reconciliation against the current disk bytes, so a save during watcher debounce adopts an outputs-only update or opens the structural conflict prompt instead of overwriting it. It then runs `notebook::rebuild(doc, buffer)`. A malformed marker returns `Failed`. A real save of a notebook whose layout is not canonical returns `Deferred` with the `NotebookReformat` prompt unless `reformat_confirmed`. Otherwise it writes the bytes (a no-op rebuild is written only when the user already chose to keep the local version of different disk bytes), calls `doc.commit_save()`, and puts tokens on the marker lines of new cells (`new_tokens` appended, `replaced_tokens` for later copies of a duplicated token, a marker line for text above the first marker) through the `TextArea` editing API, restoring cursor and selection. Undo history is kept.
+- *Watcher*: change detection uses the raw-bytes digest (`doc.disk_digest()`), so our own save never reloads or conflicts. A pristine tab re-projects the disk; if the text is the same (only outputs/metadata changed) it keeps the buffer and its tokens. A dirty tab adopts an outputs-only change (`outputs_only_change` / `adopt_disk_outputs`), otherwise it raises the conflict prompt with the raw disk JSON in `conflict_disk_text`. An outputs-only result just written by **Notebook: Run all** keeps the run completion status instead of replacing it with the generic disk-update status. `R` re-projects it with fresh tokens; `K`/`D`/`Esc` keep the old doc as the save base and record the disk text in `open_disk_snapshot`, so that version does not prompt again and the next save overwrites it. Because `poll_fs_changes()` reconciles only the active tab, `reconcile_activated_notebook()` repeats it when a notebook tab becomes active (`switch_to_tab`, `focus_other_pane`, `close_tab_at`, `close_pane`); it is a no-op on raw tabs.
+- *Autosave*: next to `<autosave>` a notebook tab writes `<autosave>.nbtokens` (`{disk_digest, tokens}`), removed with the autosave. Recovery adopts those tokens when the digest matches the file; otherwise it runs `strip_tokens()` on the recovered text (all cells new) and sets `recovery_tokens_stale`, which the recovery prompt shows. The sidecar also marks the autosave's view: `check_recovery_for_open_file()` offers an autosave only when sidecar presence matches the tab (notebook tab: sidecar; raw tab: none); on a mismatch it sets a status, keeps both files and sets `Tab::keep_autosave`, so that tab never autosaves, clears or deletes them. A raw autosave of an `.ipynb` removes a stale sidecar.
+- *Search*: project search lists notebooks case-insensitively with `rg --files --iglob '*.ipynb'`; when that list is non-empty, the ordinary search excludes them with `--iglob '!*.ipynb'` and searches each projected notebook separately. Generated marker rows are blanked and any hits on those rows are discarded. If the list is empty, the pre-notebook search command runs unchanged.
+- *Reopen*: the palette commands "Reopen as raw JSON" / "Reopen as notebook" switch a clean tab's mode in place.
+- *Palette*: `refresh_menu_results()` lists the notebook commands and "Reopen as raw JSON" only on a notebook tab, "Reopen as notebook" only on a raw tab with an `.ipynb` path (`notebook_io::is_ipynb_path`), and "Notebook: Stop run" also while a run is active. On any other tab the palette is the pre-notebook list.
 
 Inside `handle_editor_key()`, editor-scoped keybinds are checked before falling through to `tui_textarea::Input` for basic text editing (arrow keys, typing characters, etc.).
 
@@ -141,6 +164,8 @@ Each theme defines: background, foreground, accent, selection, border colors + s
 
 Lightweight, line-at-a-time highlighting in `highlight_line()`. No AST — just keyword matching, string/comment detection, and bracket depth tracking. Supports 11 language families detected by file extension.
 
+The language is a property of the tab: `Tab::syntax_lang()` returns the notebook's kernel language for a notebook tab (`tab.notebook.is_some()`) and `syntax_lang_for_path()` otherwise. Highlighting, folds, keyword completion and toggle comment (`Tab::comment_prefix()`) all read it, and `open_file_as` uses the same `tab_syntax_lang()` helper before the tab exists. On notebook tabs, `compute_tab_fold_ranges()` adds one fold per cell (`compute_cell_fold_ranges()`: marker line to the line before the next marker), and cell marker lines draw in the accent colour, bold. A `.ipynb` opened as raw JSON is a normal text tab.
+
 Bracket colorization uses a depth counter computed per-file in `compute_fold_ranges()`, cycling through 3 theme-defined colors.
 
 ## File Tree
@@ -153,9 +178,9 @@ Git status is computed by shelling out to `git` (no libgit2 dependency):
 
 - **Branch**: `git rev-parse --abbrev-ref HEAD` → top bar display
 - **File statuses**: `git status --porcelain -z` → NUL-separated parsing for safe handling of paths with spaces/special characters. Statuses propagate up to parent directories (Modified > Added > Untracked priority, matching VS Code behavior).
-- **Line statuses**: `git diff HEAD -- <file>` → unified diff hunk parsing. Falls back to `git status --porcelain` for untracked files (all lines marked Added). Stored per-tab in `Tab.git_line_status`.
+- **Line statuses**: `git diff HEAD -- <file>` → unified diff hunk parsing. Falls back to `git status --porcelain` for untracked files (all lines marked Added). Stored per-tab in `Tab.git_line_status`. Notebook tabs get an all-`None` gutter (the diff is of the raw JSON, not the projected cell text); a `.ipynb` opened as raw JSON keeps the normal gutter.
 - **Change summary**: `GitChangeSummary` counts (modified/added/untracked) shown in top bar as `Δ: ~M +A ?U`.
-- **Diff view**: `diff::git_diff_for_file` runs `git diff HEAD -- <file>` (untracked files become all-added) and `parse_unified_diff` pairs removed/added runs into `DiffRow`s; `ui/overlays.rs::render_diff_view` draws them side by side with hunk headers. `app/git_diff.rs` owns the keys (n/p hunks, Enter jumps) and `Alt+N`/`Alt+P` change jumps via `diff::next_change_row` over the gutter statuses.
+- **Diff view**: `diff::git_diff_for_file` runs `git diff HEAD -- <file>` (untracked files become all-added) and `parse_unified_diff` pairs removed/added runs into `DiffRow`s; `ui/overlays.rs::render_diff_view` draws them side by side with hunk headers. `app/git_diff.rs` owns the keys (n/p hunks, Enter jumps; on a notebook tab Enter shows a status instead of jumping) and `Alt+N`/`Alt+P` change jumps via `diff::next_change_row` over the gutter statuses.
 - **Refresh triggers**: file open, file save, and FS change events. FS refresh uses path-aware event coalescing — only affected tabs recompute line status, with full fallback for `.git/` changes or ambiguous events.
 
 ## Testing
@@ -168,7 +193,7 @@ cargo test keybind      # tests matching "keybind"
 cargo test syntax       # tests matching "syntax"
 ```
 
-301 tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, and utilities.
+Tests cover keybindings, syntax detection, highlighting, folding, theme loading, LSP message parsing, git diff/status parsing, indent guides, notebook projection and save, notebook tab open/save/watcher/recovery wiring, and utilities. Notebook fixtures in `src/notebook/testdata/` are generated by real Jupyter writers (see its README).
 
 ## Adding a New Feature
 

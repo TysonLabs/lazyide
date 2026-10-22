@@ -67,6 +67,10 @@ pub(crate) enum KeyAction {
     GoToEnd,
     GitNextChange,
     GitPrevChange,
+    // Editor, notebook tabs only (fall through on other tabs)
+    NextCell,
+    PrevCell,
+    InsertCellBelow,
 }
 
 impl KeyAction {
@@ -105,6 +109,15 @@ impl KeyAction {
 
     pub(crate) fn is_editor(self) -> bool {
         !self.is_global()
+    }
+
+    /// Acts only on a notebook tab; on any other tab the key falls through
+    /// to the editor's own handling.
+    pub(crate) fn is_notebook_only(self) -> bool {
+        matches!(
+            self,
+            KeyAction::NextCell | KeyAction::PrevCell | KeyAction::InsertCellBelow
+        )
     }
 
     pub(crate) fn label(self) -> &'static str {
@@ -163,6 +176,9 @@ impl KeyAction {
             KeyAction::PageUp => "Page Up",
             KeyAction::GoToStart => "Go to Start",
             KeyAction::GoToEnd => "Go to End",
+            KeyAction::NextCell => "Notebook: Next Cell",
+            KeyAction::PrevCell => "Notebook: Previous Cell",
+            KeyAction::InsertCellBelow => "Notebook: Insert Cell Below",
         }
     }
 
@@ -222,6 +238,10 @@ impl KeyAction {
             KeyAction::GoToEnd,
             KeyAction::GitNextChange,
             KeyAction::GitPrevChange,
+            // Appended last so a user binding on the same key wins in lookup.
+            KeyAction::NextCell,
+            KeyAction::PrevCell,
+            KeyAction::InsertCellBelow,
         ]
     }
 }
@@ -660,6 +680,9 @@ impl KeyBindings {
         bind(KeyAction::PageUp, "pageup");
         bind(KeyAction::GoToStart, "ctrl+home");
         bind(KeyAction::GoToEnd, "ctrl+end");
+        bind(KeyAction::NextCell, "alt+down");
+        bind(KeyAction::PrevCell, "alt+up");
+        bind(KeyAction::InsertCellBelow, "alt+c");
 
         KeyBindings { map }
     }
@@ -1441,5 +1464,82 @@ mod keybind_tests {
         // New bind should resolve to target action.
         let new_evt = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert_eq!(kb.lookup(&new_evt, KeyScope::Global), Some(target));
+    }
+
+    #[test]
+    fn test_notebook_cell_defaults_resolve_without_shadowing() {
+        let kb = KeyBindings::defaults();
+        let lookup = |code, mods| kb.lookup(&KeyEvent::new(code, mods), KeyScope::Editor);
+        assert_eq!(
+            lookup(KeyCode::Down, KeyModifiers::ALT),
+            Some(KeyAction::NextCell)
+        );
+        assert_eq!(
+            lookup(KeyCode::Up, KeyModifiers::ALT),
+            Some(KeyAction::PrevCell)
+        );
+        assert_eq!(
+            lookup(KeyCode::Char('c'), KeyModifiers::ALT),
+            Some(KeyAction::InsertCellBelow)
+        );
+        let shift_alt = KeyModifiers::SHIFT | KeyModifiers::ALT;
+        assert_eq!(
+            lookup(KeyCode::Down, shift_alt),
+            Some(KeyAction::DupLineDown)
+        );
+        assert_eq!(lookup(KeyCode::Up, shift_alt), Some(KeyAction::DupLineUp));
+        for code in [KeyCode::Down, KeyCode::Up, KeyCode::Char('c')] {
+            let event = KeyEvent::new(code, KeyModifiers::ALT);
+            assert_eq!(kb.lookup(&event, KeyScope::Global), None, "{code:?}");
+        }
+        assert!(kb.conflicts().is_empty());
+        for action in [
+            KeyAction::NextCell,
+            KeyAction::PrevCell,
+            KeyAction::InsertCellBelow,
+        ] {
+            assert!(action.is_editor() && action.is_notebook_only());
+        }
+        assert_eq!(
+            parse_key_action_name("insert_cell_below"),
+            Some(KeyAction::InsertCellBelow)
+        );
+        assert_eq!(
+            parse_key_action_name("next_cell"),
+            Some(KeyAction::NextCell)
+        );
+        assert_eq!(
+            parse_key_action_name("prev_cell"),
+            Some(KeyAction::PrevCell)
+        );
+    }
+
+    /// Guardrail 4: the notebook actions come last in `KeyAction::all()`, so
+    /// a user's binding on the same key keeps resolving to the user's action.
+    #[test]
+    fn test_user_override_on_notebook_key_wins() {
+        let mut kb = KeyBindings::defaults();
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "toggle_comment".to_string(),
+            SingleOrVec::Single("alt+c".to_string()),
+        );
+        overrides.insert(
+            "dup_line_down".to_string(),
+            SingleOrVec::Single("alt+down".to_string()),
+        );
+        apply_keybinding_overrides(&mut kb, overrides, "test");
+        let lookup = |code| kb.lookup(&KeyEvent::new(code, KeyModifiers::ALT), KeyScope::Editor);
+        assert_eq!(lookup(KeyCode::Char('c')), Some(KeyAction::ToggleComment));
+        assert_eq!(lookup(KeyCode::Down), Some(KeyAction::DupLineDown));
+        let n = KeyAction::all().len();
+        assert_eq!(
+            &KeyAction::all()[n - 3..],
+            &[
+                KeyAction::NextCell,
+                KeyAction::PrevCell,
+                KeyAction::InsertCellBelow
+            ]
+        );
     }
 }

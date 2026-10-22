@@ -37,6 +37,9 @@ pub(crate) fn pending_hint(pending: &PendingAction) -> String {
                 m
             )
         }
+        PendingAction::NotebookReformat { .. } => {
+            "Pending notebook reformat: Y save, N/Esc cancel".to_string()
+        }
         PendingAction::Delete(path) => format!(
             "Pending delete {}: Enter/Y confirm, Esc/N cancel",
             path.file_name()
@@ -72,6 +75,15 @@ pub(crate) fn command_action_label(action: CommandAction) -> &'static str {
         CommandAction::MoveTabToOtherPane => "Move Tab to Other Pane",
         CommandAction::ClosePane => "Close Pane",
         CommandAction::ToggleMinimap => "Toggle Minimap",
+        CommandAction::NotebookNextCell => "Notebook: Next cell",
+        CommandAction::NotebookPrevCell => "Notebook: Previous cell",
+        CommandAction::NotebookInsertCellBelow => "Notebook: Insert cell below",
+        CommandAction::NotebookToggleCellType => "Notebook: Toggle markdown/code",
+        CommandAction::NotebookClearOutputs => "Notebook: Clear all outputs",
+        CommandAction::ReopenAsRawJson => "Reopen as raw JSON",
+        CommandAction::ReopenAsNotebook => "Reopen as notebook",
+        CommandAction::NotebookRunAll => "Notebook: Run all (nbconvert)",
+        CommandAction::NotebookStopRun => "Notebook: Stop run",
     }
 }
 
@@ -205,13 +217,16 @@ pub(crate) fn detect_git_branch(root: &Path) -> Option<String> {
     }
 }
 
+/// Per-line git gutter for a tab. A notebook tab shows projected cell text,
+/// so line numbers of the raw JSON diff do not apply: its gutter is all `None`.
 pub(crate) fn compute_git_line_status(
     root: &Path,
     file_path: &Path,
     line_count: usize,
+    is_notebook: bool,
 ) -> Vec<GitLineStatus> {
     let mut result = vec![GitLineStatus::None; line_count];
-    if line_count == 0 {
+    if line_count == 0 || is_notebook {
         return result;
     }
     let rel = file_path.strip_prefix(root).unwrap_or(file_path);
@@ -436,7 +451,7 @@ fn parse_porcelain_z_entries(raw: &str) -> Vec<(String, GitFileStatus)> {
 
 pub(crate) fn spawn_git_refresh(
     root: PathBuf,
-    tab_paths: Vec<(PathBuf, usize)>,
+    tab_paths: Vec<(PathBuf, usize, bool)>,
     tx: std::sync::mpsc::Sender<crate::app::GitResult>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
@@ -445,8 +460,8 @@ pub(crate) fn spawn_git_refresh(
         let change_summary = compute_git_change_summary(&root);
         let line_statuses: Vec<(PathBuf, Vec<GitLineStatus>)> = tab_paths
             .into_iter()
-            .map(|(path, line_count)| {
-                let status = compute_git_line_status(&root, &path, line_count);
+            .map(|(path, line_count, is_notebook)| {
+                let status = compute_git_line_status(&root, &path, line_count, is_notebook);
                 (path, status)
             })
             .collect();
@@ -462,6 +477,48 @@ pub(crate) fn spawn_git_refresh(
 pub(crate) fn file_uri(path: &Path) -> Option<String> {
     let abs = path.canonicalize().ok()?;
     Url::from_file_path(abs).ok().map(|u| u.to_string())
+}
+
+/// Fold ranges for a tab: `compute_fold_ranges`, plus one fold per notebook
+/// cell on notebook tabs. A cell fold replaces any other fold that starts on
+/// its marker line, so the marker folds the whole cell.
+pub(crate) fn compute_tab_fold_ranges(
+    lines: &[String],
+    lang: SyntaxLang,
+    is_notebook: bool,
+) -> (Vec<FoldRange>, Vec<u16>) {
+    let (mut ranges, bracket_depths) = compute_fold_ranges(lines, lang);
+    if is_notebook {
+        let cells = compute_cell_fold_ranges(lines);
+        ranges.retain(|r| !cells.iter().any(|c| c.start_line == r.start_line));
+        ranges.extend(cells);
+        ranges.sort_by_key(|r| (r.start_line, r.end_line));
+    }
+    (ranges, bracket_depths)
+}
+
+/// One fold per notebook cell: from its marker line to the line before the
+/// next marker (the last cell runs to the end). Single-line cells are skipped.
+pub(crate) fn compute_cell_fold_ranges(lines: &[String]) -> Vec<FoldRange> {
+    let markers: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| crate::notebook::is_marker_like(line))
+        .map(|(row, _)| row)
+        .collect();
+    let mut ranges = Vec::new();
+    for (i, &start_line) in markers.iter().enumerate() {
+        let end_line = markers
+            .get(i + 1)
+            .map_or(lines.len().saturating_sub(1), |next| next - 1);
+        if end_line > start_line {
+            ranges.push(FoldRange {
+                start_line,
+                end_line,
+            });
+        }
+    }
+    ranges
 }
 
 pub(crate) fn compute_fold_ranges(
@@ -1199,6 +1256,78 @@ mod fold_and_selection_tests {
         assert!(ranges.iter().any(|r| r.start_line == 1 && r.end_line == 3));
     }
 
+    fn lines_of(text: &[&str]) -> Vec<String> {
+        text.iter().map(|l| l.to_string()).collect()
+    }
+
+    fn spans(ranges: &[FoldRange]) -> Vec<(usize, usize)> {
+        ranges.iter().map(|r| (r.start_line, r.end_line)).collect()
+    }
+
+    #[test]
+    fn test_cell_fold_ranges_marker_to_line_before_next() {
+        let lines = lines_of(&[
+            "# %% #aaaaaa",
+            "import os",
+            "",
+            "# %% [markdown] #bbbbbb",
+            "# Title",
+            "",
+            "# %% #cccccc",
+            "x = 1",
+            "y = 2",
+        ]);
+        assert_eq!(
+            spans(&compute_cell_fold_ranges(&lines)),
+            vec![(0, 2), (3, 5), (6, 8)]
+        );
+    }
+
+    #[test]
+    fn test_cell_fold_ranges_skip_single_line_cells_and_preamble() {
+        let lines = lines_of(&["preamble", "# %%", "# %% [raw]", "text", "# %%"]);
+        // Row 1 and the last marker are single-line cells; row 0 is no cell.
+        assert_eq!(spans(&compute_cell_fold_ranges(&lines)), vec![(2, 3)]);
+        assert!(compute_cell_fold_ranges(&lines_of(&["a", "b"])).is_empty());
+        assert!(compute_cell_fold_ranges(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_tab_fold_ranges_raw_tab_ignores_markers() {
+        let lines = lines_of(&["# %%", "def f():", "    return 1", "# %%", "x = 1"]);
+        let (raw, raw_depths) = compute_tab_fold_ranges(&lines, SyntaxLang::Python, false);
+        let (plain, plain_depths) = compute_fold_ranges(&lines, SyntaxLang::Python);
+        assert_eq!(spans(&raw), spans(&plain));
+        assert_eq!(raw_depths, plain_depths);
+    }
+
+    #[test]
+    fn test_tab_fold_ranges_notebook_merges_cells() {
+        let lines = lines_of(&["# %%", "def f():", "    return 1", "", "# %%", "x = 1"]);
+        let (plain, _) = compute_fold_ranges(&lines, SyntaxLang::Python);
+        let (ranges, _) = compute_tab_fold_ranges(&lines, SyntaxLang::Python, true);
+        // Cell folds added, every code fold (none starts on a marker) kept.
+        let mut want = spans(&plain);
+        want.extend([(0, 3), (4, 5)]);
+        want.sort();
+        assert_eq!(spans(&ranges), want);
+    }
+
+    #[test]
+    fn test_tab_fold_ranges_cell_fold_wins_on_marker_line() {
+        // An indented first line makes an indentation fold start on the marker.
+        let lines = lines_of(&["# %%", "    a = 1", "    b = 2", "", "# %%", "c = 3"]);
+        let (plain, _) = compute_fold_ranges(&lines, SyntaxLang::Python);
+        assert!(plain.iter().any(|r| r.start_line == 0));
+        let (ranges, _) = compute_tab_fold_ranges(&lines, SyntaxLang::Python, true);
+        let on_marker: Vec<_> = ranges.iter().filter(|r| r.start_line == 0).collect();
+        assert_eq!(
+            spans(&on_marker.into_iter().cloned().collect::<Vec<_>>()),
+            vec![(0, 3)]
+        );
+        assert!(ranges.iter().any(|r| r.start_line == 4 && r.end_line == 5));
+    }
+
     // row_has_selection tests
 
     #[test]
@@ -1723,6 +1852,13 @@ mod utility_tests {
         assert!(hint.contains("file.rs"));
     }
 
+    #[test]
+    fn test_pending_hint_notebook_reformat() {
+        let hint = pending_hint(&PendingAction::NotebookReformat { then_close: true });
+        assert!(hint.contains("reformat"));
+        assert!(hint.contains("Y save"));
+    }
+
     // command_action_label tests
 
     #[test]
@@ -1815,7 +1951,11 @@ mod async_git_tests {
         let fake_file = tmp.path().join("test.rs");
         std::fs::write(&fake_file, "fn main() {}\n").expect("write");
         let (tx, rx) = mpsc::channel();
-        spawn_git_refresh(tmp.path().to_path_buf(), vec![(fake_file.clone(), 1)], tx);
+        spawn_git_refresh(
+            tmp.path().to_path_buf(),
+            vec![(fake_file.clone(), 1, false)],
+            tx,
+        );
         let result = rx
             .recv_timeout(Duration::from_secs(5))
             .expect("should receive GitResult");
@@ -1823,6 +1963,40 @@ mod async_git_tests {
         assert_eq!(result.line_statuses.len(), 1);
         assert_eq!(result.line_statuses[0].0, fake_file);
         assert_eq!(result.line_statuses[0].1.len(), 1);
+    }
+
+    /// An untracked file in a git repo: the raw tab gets an all-Added gutter,
+    /// a notebook tab of the same file gets an all-None gutter.
+    #[test]
+    fn test_git_line_status_notebook_flag_blanks_gutter() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["init", "-q"])
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok {
+            return; // git not installed
+        }
+        let file = tmp.path().join("nb.ipynb");
+        std::fs::write(&file, "{}\n").expect("write");
+        let raw = compute_git_line_status(tmp.path(), &file, 2, false);
+        assert_eq!(raw, vec![GitLineStatus::Added; 2]);
+        let nb = compute_git_line_status(tmp.path(), &file, 2, true);
+        assert_eq!(nb, vec![GitLineStatus::None; 2]);
+
+        let (tx, rx) = mpsc::channel();
+        spawn_git_refresh(
+            tmp.path().to_path_buf(),
+            vec![(file.clone(), 2, false), (file.clone(), 2, true)],
+            tx,
+        );
+        let result = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("should receive GitResult");
+        assert_eq!(result.line_statuses[0].1, vec![GitLineStatus::Added; 2]);
+        assert_eq!(result.line_statuses[1].1, vec![GitLineStatus::None; 2]);
     }
 
     #[test]

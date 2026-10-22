@@ -29,6 +29,20 @@ pub(crate) fn autosave_path_for(path: &Path) -> PathBuf {
     base.join("autosave").join(format!("{hash:016x}.autosave"))
 }
 
+/// Sidecar next to a notebook tab's autosave: the cell tokens of the
+/// projected text and the digest of the notebook bytes they belong to.
+pub(crate) fn nbtokens_path_for(path: &Path) -> PathBuf {
+    let mut p = autosave_path_for(path).into_os_string();
+    p.push(".nbtokens");
+    PathBuf::from(p)
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct NotebookTokens {
+    pub(crate) disk_digest: u64,
+    pub(crate) tokens: Vec<String>,
+}
+
 pub(crate) fn state_file_path() -> Option<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
         && !xdg.is_empty()

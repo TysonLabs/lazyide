@@ -15,7 +15,7 @@ cargo run              # Run the application
 cargo run -- <path>    # Open a specific project directory
 ```
 
-Rust 2024 edition. No custom build scripts, no CI/CD.
+Rust 2024 edition. No custom build scripts. CI (`.github/workflows/ci.yml`) runs `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test`.
 
 ## Architecture
 
@@ -32,11 +32,15 @@ The app is now modular (library + thin binary launcher):
   - `search.rs` (find/replace/project search)
   - `git_diff.rs` (diff view keys, next/previous change jumps)
   - `panes.rs` (two-pane split: focus swap, split/close/move tab, layout, divider drag)
+  - `notebook_cmds.rs` (notebook commands: cell navigation/insert, toggle code/markdown, clear outputs)
   - `lsp.rs` (LSP lifecycle, diagnostics, completion, definition handling)
+  - `notebook_io.rs` (notebook tabs: save with token insertion, watcher reload/adopt/conflict, autosave token sidecar, reopen as raw/notebook)
+  - `notebook_run.rs` (Run notebook / Stop run: `jupyter nbconvert` child process, polled in the event loop)
 - `src/ui/mod.rs` + `src/ui/overlays.rs` + `src/ui/helpers.rs` — drawing and overlays
 - Shared domain/util modules:
   - `src/types.rs`, `src/tab.rs`, `src/tree_item.rs`
   - `src/theme.rs`, `src/syntax.rs`, `src/persistence.rs`, `src/lsp_client.rs`, `src/keybinds.rs`, `src/diff.rs`, `src/minimap.rs`, `src/util.rs`
+  - `src/notebook.rs` — pure Jupyter `.ipynb` projection: notebook JSON <-> percent-format cell text with identity tokens; saves splice only changed cells into the original JSON (raw values, never re-serialized). Design: `docs/notebooks-design.md`
 
 Core model remains the same:
 
@@ -50,6 +54,7 @@ Core model remains the same:
 - **rust-analyzer** — LSP server (resolved from multiple known paths including rustup and brew)
 - **ripgrep (`rg`)** — Powers project-wide search (Ctrl+Shift+F)
 - **System clipboard** — Via `arboard` crate
+- **jupyter nbconvert + ipykernel** (optional) — Run notebook (palette "Notebook: Run all (nbconvert)")
 
 ## File Tree
 
