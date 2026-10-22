@@ -215,8 +215,16 @@ impl App {
         let rel = relative_path(&self.root, path).display().to_string();
         let (doc, shown, status) = match notebook::project(&disk_text) {
             Ok(fresh) => {
+                // Same cells as the buffer (compared like a save does, so a
+                // layout that differs from the canonical projection, such as
+                // a missing blank separator, still counts as unchanged): keep
+                // the buffer and its tokens, take the new outputs.
+                let outputs_only = doc.outputs_only_change(&fresh);
                 let mut same = fresh.clone();
-                if same.adopt_tokens(&old_tokens) && same.projected_text() == current {
+                if outputs_only
+                    && same.adopt_tokens(&old_tokens)
+                    && notebook::rebuild(&same, &current).is_ok_and(|r| r.unchanged)
+                {
                     let tab = &mut self.tabs[idx];
                     tab.notebook = Some(same);
                     tab.open_disk_snapshot = Some(disk_text);
@@ -240,7 +248,11 @@ impl App {
         tab.dirty = false;
         tab.open_disk_snapshot = Some(disk_text);
         self.notify_lsp_did_change();
-        self.set_status(status);
+        // A pending run result for this path is consumed here too, and its
+        // status kept when this reload is that run's own output.
+        if !self.take_run_result(path, disk_digest) {
+            self.set_status(status);
+        }
         Ok(())
     }
 
@@ -830,6 +842,63 @@ mod tests {
         assert!(!app.tabs[0].is_notebook());
         assert_eq!(buffer(&app), "{ not json");
         assert!(app.status.starts_with("Reloaded a.ipynb as raw JSON: "));
+    }
+
+    /// A saved cell typed into the line Insert cell left (so no blank
+    /// separator before the next marker) is still the same content as the
+    /// disk: an outputs-only change keeps the buffer, its layout and tokens.
+    #[test]
+    fn outputs_only_change_keeps_noncanonical_layout_and_tokens() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, path) = open(tmp.path(), "a.ipynb", V44);
+        let row = row_of(&app, "x");
+        app.tabs[0]
+            .editor
+            .move_cursor(CursorMove::Jump(row as u16, 0));
+        app.notebook_insert_cell_below();
+        app.tabs[0].editor.insert_str("z = 3");
+        assert_eq!(app.save_file().expect("save"), SaveOutcome::Saved);
+        let saved = buffer(&app);
+        let z = row_of(&app, "z = 3");
+        assert!(
+            notebook::is_marker_like(&lines(&app)[z + 1]),
+            "test needs the next marker directly after the typed line"
+        );
+        let disk = fs::read_to_string(&path).expect("read");
+        fs::write(&path, disk.replace("\"1\"\n", "\"42\"\n")).expect("write");
+        app.reload_open_file_from_disk_if_pristine().expect("poll");
+        assert_eq!(buffer(&app), saved);
+        assert_eq!(app.status, "Notebook outputs updated on disk");
+    }
+
+    /// Cell tokens are identities, not positions. If an external editor
+    /// deletes A, edits B to look like A, and inserts a replacement for B,
+    /// the unchanged-looking projection must not attach A/B's old tokens to
+    /// B/the replacement.
+    #[test]
+    fn pristine_reload_rejects_positionally_matching_replacement_cells() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, path) = open(tmp.path(), "a.ipynb", LAB45);
+        let old_markers = markers(&app);
+
+        let mut disk: Value = serde_json::from_str(LAB45).expect("json");
+        let cells = disk["cells"].as_array_mut().expect("cells");
+        let deleted_a = cells.remove(1);
+        let replacement_b = cells[1].clone();
+        cells[1]["source"] = deleted_a["source"].clone();
+        let mut inserted_b = replacement_b;
+        inserted_b["id"] = Value::String("replacement-b".to_string());
+        cells.insert(2, inserted_b);
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&disk).expect("serialize"),
+        )
+        .expect("write");
+
+        app.reload_open_file_from_disk_if_pristine().expect("poll");
+
+        assert_ne!(markers(&app), old_markers);
+        assert_eq!(app.status, "Reloaded a.ipynb from disk");
     }
 
     /// Simulate a crash: autosave a dirty notebook tab, then drop the app.
