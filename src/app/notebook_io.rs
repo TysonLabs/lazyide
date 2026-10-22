@@ -219,8 +219,10 @@ impl App {
                 // layout that differs from the canonical projection, such as
                 // a missing blank separator, still counts as unchanged): keep
                 // the buffer and its tokens, take the new outputs.
+                let outputs_only = doc.outputs_only_change(&fresh);
                 let mut same = fresh.clone();
-                if same.adopt_tokens(&old_tokens)
+                if outputs_only
+                    && same.adopt_tokens(&old_tokens)
                     && notebook::rebuild(&same, &current).is_ok_and(|r| r.unchanged)
                 {
                     let tab = &mut self.tabs[idx];
@@ -867,6 +869,36 @@ mod tests {
         app.reload_open_file_from_disk_if_pristine().expect("poll");
         assert_eq!(buffer(&app), saved);
         assert_eq!(app.status, "Notebook outputs updated on disk");
+    }
+
+    /// Cell tokens are identities, not positions. If an external editor
+    /// deletes A, edits B to look like A, and inserts a replacement for B,
+    /// the unchanged-looking projection must not attach A/B's old tokens to
+    /// B/the replacement.
+    #[test]
+    fn pristine_reload_rejects_positionally_matching_replacement_cells() {
+        let tmp = tempdir().expect("tempdir");
+        let (mut app, path) = open(tmp.path(), "a.ipynb", LAB45);
+        let old_markers = markers(&app);
+
+        let mut disk: Value = serde_json::from_str(LAB45).expect("json");
+        let cells = disk["cells"].as_array_mut().expect("cells");
+        let deleted_a = cells.remove(1);
+        let replacement_b = cells[1].clone();
+        cells[1]["source"] = deleted_a["source"].clone();
+        let mut inserted_b = replacement_b;
+        inserted_b["id"] = Value::String("replacement-b".to_string());
+        cells.insert(2, inserted_b);
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&disk).expect("serialize"),
+        )
+        .expect("write");
+
+        app.reload_open_file_from_disk_if_pristine().expect("poll");
+
+        assert_ne!(markers(&app), old_markers);
+        assert_eq!(app.status, "Reloaded a.ipynb from disk");
     }
 
     /// Simulate a crash: autosave a dirty notebook tab, then drop the app.
