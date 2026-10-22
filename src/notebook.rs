@@ -1823,4 +1823,112 @@ mod tests {
             }
         }
     }
+
+    /// Opt-in corpus check over real notebooks (not run by default):
+    /// `LAZYIDE_NB_CORPUS=<dir> cargo test corpus_round_trip -- --ignored --nocapture`.
+    /// Each `.ipynb` must either fall back with a reason, or open, save
+    /// byte-identically unchanged, and keep every cell but the edited one
+    /// equal after a one-line edit. Edited results go to
+    /// `LAZYIDE_NB_CORPUS_OUT` (when set) for external nbformat validation.
+    #[test]
+    #[ignore]
+    fn corpus_round_trip() {
+        let Ok(dir) = std::env::var("LAZYIDE_NB_CORPUS") else {
+            eprintln!("LAZYIDE_NB_CORPUS not set; skipping");
+            return;
+        };
+        let out = std::env::var("LAZYIDE_NB_CORPUS_OUT").ok();
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .expect("corpus dir")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x == "ipynb"))
+            .collect();
+        paths.sort();
+        let (mut ok, mut fallback, mut edited) = (0, 0, 0);
+        for path in &paths {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let text = std::fs::read_to_string(path).expect("read");
+            let t0 = std::time::Instant::now();
+            let doc = match project(&text) {
+                Ok(doc) => doc,
+                Err(e) => {
+                    eprintln!("FALLBACK {name}: {e}");
+                    fallback += 1;
+                    continue;
+                }
+            };
+            let open_ms = t0.elapsed().as_millis();
+            let t1 = std::time::Instant::now();
+            let same = rebuild(&doc, doc.projected_text()).expect("no-op rebuild");
+            let noop_ms = t1.elapsed().as_millis();
+            assert!(same.unchanged, "{name}: no-op save not unchanged");
+            assert_eq!(same.bytes, text, "{name}: no-op save changed bytes");
+            ok += 1;
+            // Append a comment to the first non-empty line of the first
+            // code cell, then check only that cell's source changed.
+            let lines: Vec<&str> = doc.projected_text().split('\n').collect();
+            let mut target = None;
+            for (i, line) in lines.iter().enumerate() {
+                if parse_marker(line).is_some_and(|m| m.kind == CellKind::Code)
+                    && lines
+                        .get(i + 1)
+                        .is_some_and(|l| !l.is_empty() && !is_marker_like(l))
+                {
+                    target = Some(i + 1);
+                    break;
+                }
+            }
+            let Some(row) = target else {
+                eprintln!(
+                    "ok {name}: open {open_ms} ms, no-op {noop_ms} ms (no code cell to edit)"
+                );
+                continue;
+            };
+            let mut edited_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+            edited_lines[row].push_str("  # lazyide-edit");
+            let t2 = std::time::Instant::now();
+            let rebuilt = rebuild(&doc, &edited_lines.join("\n")).expect("edit rebuild");
+            let edit_ms = t2.elapsed().as_millis();
+            assert!(!rebuilt.unchanged, "{name}: edit not detected");
+            let before: serde_json::Value = serde_json::from_str(&text).expect("json before");
+            let after: serde_json::Value =
+                serde_json::from_str(&rebuilt.bytes).expect("json after");
+            let (bc, ac) = (
+                before["cells"].as_array().unwrap(),
+                after["cells"].as_array().unwrap(),
+            );
+            assert_eq!(bc.len(), ac.len(), "{name}: cell count changed");
+            let changed: Vec<usize> = (0..bc.len()).filter(|&i| bc[i] != ac[i]).collect();
+            assert_eq!(changed.len(), 1, "{name}: changed cells {changed:?}");
+            let i = changed[0];
+            let mut b = bc[i].clone();
+            let mut a = ac[i].clone();
+            b.as_object_mut().unwrap().remove("source");
+            a.as_object_mut().unwrap().remove("source");
+            assert_eq!(b, a, "{name}: cell {i} changed beyond source");
+            let src: String = match &ac[i]["source"] {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Array(v) => v.iter().filter_map(|x| x.as_str()).collect(),
+                _ => String::new(),
+            };
+            assert!(src.contains("# lazyide-edit"), "{name}: edit missing");
+            for key in ["metadata", "nbformat", "nbformat_minor"] {
+                assert_eq!(before[key], after[key], "{name}: {key} changed");
+            }
+            if let Some(out) = &out {
+                std::fs::write(std::path::Path::new(out).join(&name), &rebuilt.bytes)
+                    .expect("write out");
+            }
+            edited += 1;
+            eprintln!(
+                "ok {name}: {} KB, open {open_ms} ms, no-op {noop_ms} ms, edit {edit_ms} ms",
+                text.len() / 1024
+            );
+        }
+        eprintln!(
+            "corpus: {} files, {ok} round-trip ok, {edited} edited ok, {fallback} fallback",
+            paths.len()
+        );
+        assert!(ok + fallback == paths.len());
+    }
 }
