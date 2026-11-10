@@ -38,9 +38,27 @@ err()   { printf "${RED}error${RESET} %s\n" "$*" >&2; exit 1; }
 
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# Privilege escalation command: sudo, or doas (Alpine's default)
+SUDO=""
+if has_cmd sudo; then
+    SUDO="sudo"
+elif has_cmd doas; then
+    SUDO="doas"
+fi
+
+as_root() {
+    if [ "$(id -u)" = "0" ]; then
+        "$@"
+    elif [ -n "$SUDO" ]; then
+        "$SUDO" "$@"
+    else
+        err "Need root privileges to run: $* (install sudo or doas, or run as root)"
+    fi
+}
+
 maybe_sudo() {
     if [ "$NEED_SUDO" = true ] || { [ ! -w "$INSTALL_DIR" ] && [ "$(id -u)" != "0" ]; }; then
-        sudo "$@"
+        as_root "$@"
     else
         "$@"
     fi
@@ -143,10 +161,10 @@ resolve_install_dir() {
         INSTALL_DIR="/usr/local/bin"
     else
         # Check if we can sudo
-        if has_cmd sudo && sudo -n true 2>/dev/null; then
+        if [ -n "$SUDO" ] && "$SUDO" -n true 2>/dev/null; then
             INSTALL_DIR="/usr/local/bin"
-        elif has_cmd sudo; then
-            if prompt_yn "Install to /usr/local/bin (requires sudo)?"; then
+        elif [ -n "$SUDO" ]; then
+            if prompt_yn "Install to /usr/local/bin (requires ${SUDO})?"; then
                 INSTALL_DIR="/usr/local/bin"
                 NEED_SUDO=true
             else
@@ -181,7 +199,20 @@ detect_platform() {
         *) err "Unsupported architecture: $ARCH" ;;
     esac
 
-    TARBALL="lazyide-${PLATFORM}-${ARCH}.tar.gz"
+    # musl-based distros (Alpine, Void musl, ...) get the static musl build
+    LIBC=""
+    if [ "$PLATFORM" = "linux" ]; then
+        if [ -f /etc/alpine-release ] || ls /lib/ld-musl-* >/dev/null 2>&1 \
+            || { has_cmd ldd && ldd --version 2>&1 | grep -qi musl; }; then
+            LIBC="musl"
+        fi
+    fi
+
+    if [ "$LIBC" = "musl" ]; then
+        TARBALL="lazyide-${PLATFORM}-${ARCH}-musl.tar.gz"
+    else
+        TARBALL="lazyide-${PLATFORM}-${ARCH}.tar.gz"
+    fi
 }
 
 # --- Resolve version ---
@@ -369,13 +400,13 @@ install_ripgrep() {
     if [ "$PLATFORM" = "macos" ] && has_cmd brew; then
         brew install ripgrep
     elif has_cmd apt-get; then
-        sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+        as_root apt-get update -qq && as_root apt-get install -y -qq ripgrep
     elif has_cmd dnf; then
-        sudo dnf install -y ripgrep
+        as_root dnf install -y ripgrep
     elif has_cmd pacman; then
-        sudo pacman -S --noconfirm ripgrep
+        as_root pacman -S --noconfirm ripgrep
     elif has_cmd apk; then
-        sudo apk add ripgrep
+        as_root apk add ripgrep
     else
         install_ripgrep_binary
     fi
@@ -411,6 +442,9 @@ install_rust_analyzer() {
         brew install rust-analyzer
     elif has_cmd rustup; then
         rustup component add rust-analyzer
+    elif has_cmd apk; then
+        # The upstream binary fallback below is glibc-linked; Alpine packages it
+        as_root apk add rust-analyzer
     else
         install_rust_analyzer_binary
     fi
@@ -456,7 +490,7 @@ main() {
     printf "\n  ${BOLD}lazyide installer${RESET}\n\n"
 
     detect_platform
-    info "Detected: ${PLATFORM} ${ARCH}"
+    info "Detected: ${PLATFORM} ${ARCH}${LIBC:+ (${LIBC})}"
 
     resolve_install_dir
     resolve_version

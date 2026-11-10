@@ -19,6 +19,12 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-22.04
             name: lazyide-linux-aarch64
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+            name: lazyide-linux-x86_64-musl
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-22.04
+            name: lazyide-linux-aarch64-musl
           - target: x86_64-apple-darwin
             os: macos-latest
             name: lazyide-macos-x86_64
@@ -49,6 +55,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
 
       - name: Package (Unix)
         if: runner.os != 'Windows'

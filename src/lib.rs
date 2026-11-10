@@ -1,5 +1,5 @@
 use std::io::{self, Stdout};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -173,21 +173,34 @@ fn run_setup() -> io::Result<()> {
     let has_ra = resolve_rust_analyzer_bin().is_some();
     let has_rg = Command::new("rg").arg("--version").output().is_ok();
 
+    // Alpine (musl): rustup/cargo binaries are usually absent, apk packages both tools.
+    let alpine = Path::new("/etc/alpine-release").exists();
+    let (ra_cmd, ra_args): (&str, &[&str]) = if alpine {
+        ("apk", &["add", "rust-analyzer"])
+    } else {
+        ("rustup", &["component", "add", "rust-analyzer"])
+    };
+    let (rg_cmd, rg_args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("brew", &["install", "ripgrep"])
+    } else if alpine {
+        ("apk", &["add", "ripgrep"])
+    } else {
+        ("cargo", &["install", "ripgrep"])
+    };
+    let ra_hint = format!("{ra_cmd} {}", ra_args.join(" "));
+    let rg_hint = format!("{rg_cmd} {}", rg_args.join(" "));
+
     if has_ra {
         println!("  [ok] rust-analyzer found");
     } else {
         println!("  [missing] rust-analyzer not found");
-        println!("    -> rustup component add rust-analyzer");
+        println!("    -> {ra_hint}");
     }
     if has_rg {
         println!("  [ok] ripgrep (rg) found");
     } else {
         println!("  [missing] ripgrep (rg) not found");
-        if cfg!(target_os = "macos") {
-            println!("    -> brew install ripgrep");
-        } else {
-            println!("    -> cargo install ripgrep");
-        }
+        println!("    -> {rg_hint}");
     }
 
     if has_ra && has_rg {
@@ -204,26 +217,19 @@ fn run_setup() -> io::Result<()> {
 
     if !has_ra {
         println!("\nInstalling rust-analyzer...");
-        let status = Command::new("rustup")
-            .args(["component", "add", "rust-analyzer"])
-            .status();
+        let status = Command::new(ra_cmd).args(ra_args).status();
         match status {
             Ok(s) if s.success() => println!("  [ok] rust-analyzer installed"),
-            _ => println!("  [failed] install manually: rustup component add rust-analyzer"),
+            _ => println!("  [failed] install manually: {ra_hint}"),
         }
     }
 
     if !has_rg {
         println!("\nInstalling ripgrep...");
-        let (cmd, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
-            ("brew", &["install", "ripgrep"])
-        } else {
-            ("cargo", &["install", "ripgrep"])
-        };
-        let status = Command::new(cmd).args(args).status();
+        let status = Command::new(rg_cmd).args(rg_args).status();
         match status {
             Ok(s) if s.success() => println!("  [ok] ripgrep installed"),
-            _ => println!("  [failed] install manually: cargo install ripgrep"),
+            _ => println!("  [failed] install manually: {rg_hint}"),
         }
     }
 
