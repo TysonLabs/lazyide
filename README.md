@@ -24,6 +24,7 @@ A full IDE experience anywhere you have a terminal. SSH into a server, run `lazy
 ```bash
 curl -fsSL https://tysonlabs.dev/lazyide/install.sh | sh
 ```
+On Alpine and other musl-based distros the installer picks the static musl build automatically.
 
 **Windows (PowerShell):**
 ```powershell
@@ -50,7 +51,13 @@ scoop install lazyide
 cargo install --git https://github.com/TysonLabs/lazyide
 ```
 
-**Prebuilt binaries:** [GitHub Releases](https://github.com/TysonLabs/lazyide/releases)
+**Static musl build (Alpine, or any Linux):**
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+**Prebuilt binaries:** [GitHub Releases](https://github.com/TysonLabs/lazyide/releases) (`lazyide-linux-*-musl.tar.gz` are fully static)
 
 **Installer flags:**
 ```bash
